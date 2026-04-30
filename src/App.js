@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle } from 'lucide-react';
+import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle, AlertCircle } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -14,9 +14,15 @@ const firebaseConfig = {
   appId: "1:504139844570:web:79e7779b643c7acf464ee3"
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// אתחול בטוח של Firebase
+let app, auth, db;
+try {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch (e) {
+  console.error("Firebase Init Error:", e);
+}
 
 // --- לוכד שגיאות ---
 class ErrorBoundary extends React.Component {
@@ -31,10 +37,16 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div className="p-8 bg-red-50 text-red-600 min-h-screen font-sans" dir="ltr">
-          <h2 className="text-2xl font-bold mb-4 border-b border-red-200 pb-2">משהו השתבש 🛠️</h2>
+          <h2 className="text-2xl font-bold mb-4 border-b border-red-200 pb-2">דיו, מצאנו בעיה בקוד! 🛠️</h2>
           <pre className="bg-white p-4 rounded-xl shadow-sm border border-red-100 overflow-auto text-sm font-mono whitespace-pre-wrap text-left">
             {this.state.error && this.state.error.toString()}
           </pre>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg font-bold"
+          >
+            רענן דף
+          </button>
         </div>
       );
     }
@@ -91,29 +103,59 @@ function LihiNailsApp() {
   const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
   const [logoUrl, setLogoUrl] = useState('https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop');
   const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState(false);
 
+  // 1. התחברות ל-Firebase
   useEffect(() => {
-    signInAnonymously(auth).catch(err => {
-      console.error(err);
-      setUser({ uid: 'fallback-user' });
-    });
+    if (!auth) {
+        setIsLoading(false);
+        setUser({ uid: 'no-auth-user' });
+        return;
+    }
+
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (err) {
+        // שקט בנשמה - אנחנו מטפלים בשגיאת הקונפיגורציה
+        if (err.code === 'auth/configuration-not-found') {
+          setAuthError(true);
+          setUser({ uid: 'guest-user', isAnonymous: true });
+        } else {
+          console.error("Auth Exception:", err);
+          setUser({ uid: 'error-user' });
+        }
+      }
+    };
+
+    initAuth();
     const unsub = onAuthStateChanged(auth, u => {
       if (u) {
-        setUser(u);
-      } else {
-        setUser({ uid: 'fallback-user' });
+          setUser(u);
+      } else if (!user) {
+          // אם אין משתמש והתהליך נכשל, נגדיר משתמש זמני כדי לא לתקוע את הטעינה
+          setTimeout(() => {
+              if (!user) setUser({ uid: 'temp-user' });
+          }, 2000);
       }
     });
     return () => unsub();
   }, []);
 
+  // 2. משיכת נתונים
   useEffect(() => {
-    if (!user) return;
+    if (!user || !db) return;
+
+    // מאזין לתורים
     const unsubAppts = onSnapshot(collection(db, 'appointments'), snap => {
       setAppointments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setIsLoading(false);
-    }, err => { console.error(err); setIsLoading(false); });
+    }, err => { 
+      console.error("Firestore appts error:", err); 
+      setIsLoading(false); // מבטיח שהמסך יעלה גם אם יש שגיאת הרשאות
+    });
 
+    // מאזין להגדרות
     const unsubSettings = onSnapshot(doc(db, 'settings', 'main'), docSnap => {
       if (docSnap.exists()) {
         const d = docSnap.data();
@@ -121,27 +163,30 @@ function LihiNailsApp() {
         if (d.logoUrl) setLogoUrl(d.logoUrl);
         if (d.whatsappTemplate) setWhatsappTemplate(d.whatsappTemplate);
       }
+    }, err => {
+        console.warn("Settings fetch failed (expected if db is empty):", err);
     });
+
     return () => { unsubAppts(); unsubSettings(); };
   }, [user]);
 
   const handleAddAppointment = async (newAppt) => {
-    if (!user) return;
+    if (!db) return;
     try { await addDoc(collection(db, 'appointments'), newAppt); } catch(e) { console.error(e); }
   };
 
   const handleDeleteAppointment = async (id) => {
-    if (!user) return;
+    if (!db) return;
     try { await deleteDoc(doc(db, 'appointments', id)); } catch(e) { console.error(e); }
   };
 
   const handleUpdateAppointment = async (id, updatedData) => {
-    if (!user) return;
+    if (!db) return;
     try { await updateDoc(doc(db, 'appointments', id), updatedData); } catch(e) { console.error(e); }
   };
 
   const handleUpdateSetting = async (field, value) => {
-    if (!user) return;
+    if (!db) return;
     try { await setDoc(doc(db, 'settings', 'main'), { [field]: value }, { merge: true }); } catch(e) { console.error(e); }
   };
 
@@ -157,11 +202,11 @@ function LihiNailsApp() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading && !user) {
     return (
       <div className="min-h-screen bg-rose-50 flex flex-col items-center justify-center font-sans" dir="rtl">
         <div className="animate-bounce mb-4 text-pink-500"><Heart size={48} fill="currentColor" /></div>
-        <h2 className="text-xl font-bold text-gray-800">טוען את היומן של Lihi Nails... 💅</h2>
+        <h2 className="text-xl font-bold text-gray-800">מתחבר לשרת של Lihi Nails... 💅</h2>
       </div>
     );
   }
@@ -191,6 +236,18 @@ function LihiNailsApp() {
           </div>
         </header>
 
+        {authError && isAdminAuthenticated && (
+          <div className="max-w-md mx-auto mt-4 px-4 animate-slide-up">
+             <div className="bg-amber-100 border border-amber-300 p-3 rounded-xl flex gap-3 text-amber-800 text-xs shadow-md">
+                <AlertCircle size={20} className="shrink-0 text-amber-600" />
+                <p>
+                   <strong>הודעת מערכת:</strong> הנתונים נשמרים כרגע מקומית בלבד.
+                   כדי לסנכרן בין מכשירים, יש להפעיל "Anonymous" ב-Firebase Console תחת Authentication.
+                </p>
+             </div>
+          </div>
+        )}
+
         <main className="max-w-md mx-auto min-h-[calc(100vh-80px)] bg-white/95 backdrop-blur-md shadow-2xl sm:rounded-b-3xl overflow-hidden relative border-x border-b border-white/50">
           {view === 'customer' && <CustomerView schedule={schedule} appointments={appointments} onBook={handleAddAppointment} logoUrl={logoUrl} />}
           {view === 'auth' && (
@@ -207,7 +264,7 @@ function LihiNailsApp() {
                 />
                 <div className="h-6 mb-4">{pinError && <p className="text-red-500 text-xs font-bold animate-pulse">קוד שגוי, נסי שוב.</p>}</div>
                 <button onClick={handleAdminLogin} className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-pink-700 transition-colors shadow-lg mb-4">היכנסי ליומן</button>
-                <button onClick={() => { setView('customer'); setPin(''); setPinError(false); }} className="text-gray-500 font-medium hover:text-pink-600 underline text-sm">חזרה למסך הראשי</button>
+                <button onClick={() => { setView('customer'); setPin(''); setPinError(false); }} className="text-gray-500 font-medium hover:text-pink-600 underline text-sm text-center w-full block">חזרה למסך הראשי</button>
               </div>
             </div>
           )}
@@ -300,7 +357,7 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
           <div className="relative z-10 text-center flex flex-col items-center">
             <img src={logoUrl} alt="Lihi Nails" className="w-28 h-28 rounded-full border-4 border-white/40 shadow-xl mb-4 object-cover bg-white" />
             <h2 className="text-2xl font-bold mb-2 drop-shadow-md">ליהיא ניילס - מומחית ללק ג'ל 👑💅</h2>
-            <p className="text-pink-50 text-sm leading-relaxed max-w-[280px] mx-auto font-medium">שנים של ניסיון בתחום, הקפדה על הפרטים הקטנים ביותר ומאות לקוחות שכבר התמכרו. בואי להתפנק! 💖✨</p>
+            <p className="text-pink-50 text-sm leading-relaxed max-w-[280px] mx-auto font-medium text-center">שנים של ניסיון בתחום, הקפדה על הפרטים הקטנים ביותר ומאות לקוחות שכבר התמכרו. בואי להתפנק! 💖✨</p>
           </div>
         </div>
       )}
@@ -341,7 +398,7 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
           {selectedServices.length > 0 && (
             <div className="mt-8 mb-4 animate-slide-up">
               <div className="bg-pink-100 text-pink-800 p-3 rounded-xl mb-4 text-sm font-medium text-center">זמן הטיפול המשוער: {totalHours === 1 ? 'שעה 1' : `${totalHours} שעות`}</div>
-              <button onClick={() => setStep(2)} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg flex justify-center items-center gap-2 shadow-lg">המשך לבחירת תאריך <ArrowRight size={20} /></button>
+              <button onClick={() => setStep(2)} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg flex justify-center items-center gap-2 shadow-lg hover:bg-gray-800 transition-colors">המשך לבחירת תאריך <ArrowRight size={20} /></button>
             </div>
           )}
           <div className="mt-8 mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl text-center text-xs text-rose-800">
@@ -352,19 +409,19 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
 
       {step === 2 && (
         <div className="px-5 mt-6 fade-in">
-          <button onClick={() => setStep(1)} className="text-gray-500 mb-4 flex items-center gap-1"><ArrowRight size={16} /> חזרה</button>
+          <button onClick={() => setStep(1)} className="text-gray-500 mb-4 flex items-center gap-1 hover:text-pink-600 transition-colors"><ArrowRight size={16} /> חזרה</button>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Calendar className="text-pink-500" size={20} /> מתי נוח לך?</h3>
             <div className="flex gap-2">
-              <button onClick={() => scrollDates('prev')} className="p-1.5 bg-white border border-gray-200 rounded-full"><ChevronRight size={18} /></button>
-              <button onClick={() => scrollDates('next')} className="p-1.5 bg-white border border-gray-200 rounded-full"><ChevronLeft size={18} /></button>
+              <button onClick={() => scrollDates('prev')} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-pink-50"><ChevronRight size={18} /></button>
+              <button onClick={() => scrollDates('next')} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-pink-50"><ChevronLeft size={18} /></button>
             </div>
           </div>
           <div ref={dateContainerRef} className="flex overflow-x-auto gap-3 pb-4 hide-scrollbar snap-x scroll-smooth">
             {getNextDays().map((date, i) => {
               const dateStr = date.toISOString().split('T')[0];
               return (
-                <button key={dateStr} onClick={() => { setSelectedDate(dateStr); setSelectedTime(''); }} className={`flex-shrink-0 w-20 h-24 rounded-2xl flex flex-col items-center justify-center border-2 snap-center ${selectedDate === dateStr ? 'border-pink-500 bg-pink-50' : 'border-gray-200 bg-white'}`}>
+                <button key={dateStr} onClick={() => { setSelectedDate(dateStr); setSelectedTime(''); }} className={`flex-shrink-0 w-20 h-24 rounded-2xl flex flex-col items-center justify-center border-2 snap-center transition-all ${selectedDate === dateStr ? 'border-pink-500 bg-pink-50 text-pink-700' : 'border-gray-200 bg-white text-gray-600'}`}>
                   <span className="text-xs font-medium mb-1">{i === 0 ? 'היום' : i === 1 ? 'מחר' : DAYS_OF_WEEK[date.getDay()]}</span>
                   <span className="text-2xl font-bold">{date.getDate()}</span>
                   <span className="text-xs">{date.getMonth() + 1}/{date.getFullYear().toString().slice(2)}</span>
@@ -378,7 +435,7 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
               {getAvailableHoursForDate(selectedDate).length > 0 ? (
                 <div className="grid grid-cols-3 gap-3">
                   {getAvailableHoursForDate(selectedDate).map(hour => (
-                    <button key={hour} onClick={() => setSelectedTime(hour)} className={`py-3 rounded-xl text-sm font-bold ${selectedTime === hour ? 'bg-pink-600 text-white' : 'bg-white border border-gray-200'}`}>{hour}</button>
+                    <button key={hour} onClick={() => setSelectedTime(hour)} className={`py-3 rounded-xl text-sm font-bold transition-all ${selectedTime === hour ? 'bg-pink-600 text-white shadow-md' : 'bg-white border border-gray-200 text-gray-700 hover:border-pink-300'}`}>{hour}</button>
                   ))}
                 </div>
               ) : (
@@ -388,7 +445,7 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
           )}
           {selectedDate && selectedTime && (
             <div className="mt-8 animate-slide-up">
-              <button onClick={() => setStep(3)} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg flex justify-center items-center gap-2">המשך לפרטים <ArrowRight size={20} /></button>
+              <button onClick={() => setStep(3)} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg flex justify-center items-center gap-2 hover:bg-gray-800 transition-colors shadow-lg">המשך לפרטים <ArrowRight size={20} /></button>
             </div>
           )}
         </div>
@@ -396,35 +453,35 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
 
       {step === 3 && (
         <div className="p-6 fade-in h-full flex flex-col">
-          <button onClick={() => setStep(2)} className="text-gray-500 mb-6 flex items-center gap-1"><ArrowRight size={16} /> חזרה</button>
+          <button onClick={() => setStep(2)} className="text-gray-500 mb-6 flex items-center gap-1 hover:text-pink-600 transition-colors"><ArrowRight size={16} /> חזרה</button>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">עוד צעד אחד קטן...</h2>
-          <form onSubmit={submitBooking} className="space-y-5 flex-1 pb-4 mt-4">
+          <form onSubmit={submitBooking} className="space-y-5 flex-1 pb-4 mt-4 text-right" dir="rtl">
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">איך קוראים לך מהממת? <span className="text-red-500">*</span></label>
-              <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl" placeholder="שם מלא" />
+              <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-pink-400 outline-none" placeholder="שם מלא" />
             </div>
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">מספר טלפון <span className="text-red-500">*</span></label>
-              <input type="tel" required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl text-right" placeholder="05X-XXXXXXX" dir="ltr" />
+              <input type="tel" required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl text-right focus:ring-2 focus:ring-pink-400 outline-none" placeholder="05X-XXXXXXX" dir="ltr" />
             </div>
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">הערות מיוחדות? (לא חובה)</label>
-              <textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl resize-none h-24" />
+              <textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl resize-none h-24 focus:ring-2 focus:ring-pink-400 outline-none" placeholder="יש משהו שליהיא צריכה לדעת?" />
             </div>
-            <button type="submit" className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg mt-4">אשרי את התור! ✨</button>
+            <button type="submit" className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg mt-4 shadow-lg hover:bg-pink-700 transition-colors">אשרי את התור! ✨</button>
           </form>
         </div>
       )}
 
       {step === 4 && (
         <div className="p-6 h-full flex flex-col items-center justify-center text-center fade-in bg-white/90">
-          <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6 text-green-500"><CheckCircle size={50} /></div>
+          <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6 text-green-500 shadow-inner"><CheckCircle size={50} /></div>
           <h2 className="text-3xl font-black text-gray-800 mb-2">איזה כיף! 🥳</h2>
           <p className="text-xl text-pink-600 font-bold mb-4">התור שלך נקבע בהצלחה</p>
           <div className="w-full space-y-3 mb-6 mt-4">
-            <a href={generateGoogleCalendarLink()} target="_blank" rel="noopener noreferrer" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3"><CalendarPlus size={24} /> הוספה ל-Google Calendar</a>
+            <a href={generateGoogleCalendarLink()} target="_blank" rel="noopener noreferrer" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg hover:bg-blue-700 transition-colors"><CalendarPlus size={24} /> הוספה ל-Google Calendar</a>
           </div>
-          <button onClick={() => { setStep(1); setSelectedServices([]); setSelectedExtras([]); setSelectedDate(''); setSelectedTime(''); setFormData({ name: '', phone: '', notes: '' }); }} className="text-gray-500 font-medium underline">חזרה לדף הראשי</button>
+          <button onClick={() => { setStep(1); setSelectedServices([]); setSelectedExtras([]); setSelectedDate(''); setSelectedTime(''); setFormData({ name: '', phone: '', notes: '' }); }} className="text-gray-500 font-medium underline hover:text-pink-600 transition-colors">חזרה לדף הראשי</button>
         </div>
       )}
       <style dangerouslySetInnerHTML={{__html: `.hide-scrollbar::-webkit-scrollbar { display: none; } .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; } .fade-in { animation: fadeIn 0.4s ease-out; } .animate-slide-up { animation: slideUp 0.4s ease-out forwards; } @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } } @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }`}} />
@@ -437,12 +494,12 @@ function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdate
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      <div className="bg-gray-900 text-white p-5 rounded-b-3xl">
+      <div className="bg-gray-900 text-white p-5 rounded-b-3xl shadow-lg">
         <h2 className="text-2xl font-bold mb-1">היי ליהיא! 👑</h2>
       </div>
       <div className="flex px-4 mt-6 gap-2">
-        <button onClick={() => setActiveTab('appointments')} className={`flex-1 py-3 font-bold text-sm rounded-xl ${activeTab === 'appointments' ? 'bg-pink-100 text-pink-700' : 'bg-white text-gray-500 border border-gray-200'}`}>התורים שלי</button>
-        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-3 font-bold text-sm rounded-xl ${activeTab === 'settings' ? 'bg-pink-100 text-pink-700' : 'bg-white text-gray-500 border border-gray-200'}`}>הגדרות</button>
+        <button onClick={() => setActiveTab('appointments')} className={`flex-1 py-3 font-bold text-sm rounded-xl transition-all ${activeTab === 'appointments' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>התורים שלי</button>
+        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-3 font-bold text-sm rounded-xl transition-all ${activeTab === 'settings' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>הגדרות</button>
       </div>
       <div className="p-4 flex-1 overflow-y-auto">
         {activeTab === 'appointments' ? <AdminAppointmentsList appointments={appointments} onDeleteAppointment={onDeleteAppointment} onUpdateAppointment={onUpdateAppointment} whatsappTemplate={whatsappTemplate} /> : <AdminScheduleSettings schedule={schedule} logoUrl={logoUrl} whatsappTemplate={whatsappTemplate} onUpdateSetting={onUpdateSetting} />}
@@ -488,22 +545,24 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
       {sortedAppointments.map((appt) => {
         if (editingId === appt.id) {
           return (
-            <div key={appt.id} className="bg-pink-50 p-4 rounded-2xl shadow-sm border border-pink-300 relative">
+            <div key={appt.id} className="bg-pink-50 p-4 rounded-2xl shadow-sm border border-pink-300 relative text-right" dir="rtl">
               <div className="space-y-3 mb-4">
                 <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm" placeholder="שם" />
                 <input type="tel" value={editData.phone || ''} onChange={e => setEditData({...editData, phone: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm" placeholder="טלפון" dir="ltr" />
-                <input type="date" value={editData.date || ''} onChange={e => setEditData({...editData, date: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
-                <input type="time" value={editData.time || ''} onChange={e => setEditData({...editData, time: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm" />
+                <div className="flex gap-2">
+                  <input type="date" value={editData.date || ''} onChange={e => setEditData({...editData, date: e.target.value})} className="flex-1 p-2 border border-gray-200 rounded-lg text-sm" />
+                  <input type="time" value={editData.time || ''} onChange={e => setEditData({...editData, time: e.target.value})} className="flex-1 p-2 border border-gray-200 rounded-lg text-sm" />
+                </div>
               </div>
               <div className="flex gap-2 justify-end">
-                <button onClick={() => setEditingId(null)} className="px-4 py-2 bg-gray-200 rounded-lg text-sm font-bold">ביטול</button>
-                <button onClick={handleSaveEdit} className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-bold">שמור</button>
+                <button onClick={() => setEditingId(null)} className="px-4 py-2 bg-gray-200 rounded-lg text-sm font-bold hover:bg-gray-300 transition-colors">ביטול</button>
+                <button onClick={handleSaveEdit} className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-bold hover:bg-green-600 transition-colors shadow-sm">שמור</button>
               </div>
             </div>
           );
         }
         return (
-          <div key={appt.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-start relative group">
+          <div key={appt.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-start relative group text-right" dir="rtl">
             <div className="absolute right-0 top-0 bottom-0 w-1.5 bg-pink-500"></div>
             <div className="pr-2">
               <div className="font-bold text-gray-900 text-lg">{appt.name}</div>
@@ -512,9 +571,9 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
               <div className="mt-1 text-sm text-gray-600">{appt.phone}</div>
             </div>
             <div className="flex flex-col gap-2">
-              <button onClick={() => sendWhatsAppConfirmation(appt)} className="w-8 h-8 rounded-full bg-[#25D366]/10 text-[#25D366] flex items-center justify-center"><MessageCircle size={16} /></button>
-              <button onClick={() => handleEditClick(appt)} className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center"><Edit2 size={16} /></button>
-              <button onClick={() => { if(window.confirm('למחוק?')) onDeleteAppointment(appt.id); }} className="w-8 h-8 rounded-full bg-red-50 text-red-500 flex items-center justify-center"><X size={16} /></button>
+              <button onClick={() => sendWhatsAppConfirmation(appt)} className="w-8 h-8 rounded-full bg-[#25D366]/10 text-[#25D366] flex items-center justify-center hover:bg-[#25D366]/20 transition-colors shadow-sm"><MessageCircle size={16} /></button>
+              <button onClick={() => handleEditClick(appt)} className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm"><Edit2 size={16} /></button>
+              <button onClick={() => { if(window.confirm('למחוק?')) onDeleteAppointment(appt.id); }} className="w-8 h-8 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm"><X size={16} /></button>
             </div>
           </div>
         );
@@ -532,27 +591,28 @@ function AdminScheduleSettings({ schedule, logoUrl, whatsappTemplate, onUpdateSe
   };
 
   return (
-    <div className="pb-10">
+    <div className="pb-10 text-right" dir="rtl">
       <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
         {DAYS_OF_WEEK.map((dayName, index) => index !== 6 && ( 
-          <button key={index} onClick={() => setSelectedDay(index)} className={`flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm ${selectedDay === index ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 border'}`}>{dayName}</button>
+          <button key={index} onClick={() => setSelectedDay(index)} className={`flex-shrink-0 px-4 py-2 rounded-full font-bold text-sm transition-all ${selectedDay === index ? 'bg-gray-900 text-white shadow-md' : 'bg-white text-gray-600 border'}`}>{dayName}</button>
         ))}
       </div>
-      <div className="mt-4 bg-white p-5 rounded-2xl shadow-sm">
-        <h3 className="font-bold mb-4">שעות פתוחות</h3>
+      <div className="mt-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <h3 className="font-bold mb-4 text-gray-800">שעות פתוחות - יום {DAYS_OF_WEEK[selectedDay]}</h3>
         <div className="grid grid-cols-3 gap-3">
           {ALL_POSSIBLE_HOURS.map(hour => (
-            <button key={hour} onClick={() => toggleHour(hour)} className={`py-2 rounded-lg text-sm font-bold border-2 ${schedule[selectedDay]?.includes(hour) ? 'bg-green-50 border-green-500 text-green-700' : 'bg-gray-50 border-transparent text-gray-400'}`}>{hour}</button>
+            <button key={hour} onClick={() => toggleHour(hour)} className={`py-2 rounded-lg text-sm font-bold border-2 transition-all ${schedule[selectedDay]?.includes(hour) ? 'bg-green-50 border-green-500 text-green-700' : 'bg-gray-50 border-transparent text-gray-400 hover:bg-gray-100'}`}>{hour}</button>
           ))}
         </div>
       </div>
-      <div className="mt-6 bg-white p-5 rounded-2xl shadow-sm">
-        <h3 className="font-bold mb-4">לוגו האתר (URL)</h3>
-        <input type="text" value={logoUrl} onChange={(e) => onUpdateSetting('logoUrl', e.target.value)} className="w-full p-3 border rounded-xl text-sm" dir="ltr" />
+      <div className="mt-6 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <h3 className="font-bold mb-4 text-gray-800">לוגו האתר (URL) 🖼️</h3>
+        <input type="text" value={logoUrl} onChange={(e) => onUpdateSetting('logoUrl', e.target.value)} className="w-full p-3 border rounded-xl text-sm focus:ring-2 focus:ring-pink-400 outline-none" dir="ltr" placeholder="הדביקי לינק לתמונה" />
       </div>
-      <div className="mt-6 bg-white p-5 rounded-2xl shadow-sm">
-        <h3 className="font-bold mb-4">תבנית ווצאפ</h3>
-        <textarea value={whatsappTemplate} onChange={(e) => onUpdateSetting('whatsappTemplate', e.target.value)} className="w-full p-3 border rounded-xl text-sm h-48 resize-none" dir="rtl" />
+      <div className="mt-6 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+        <h3 className="font-bold mb-4 text-gray-800">תבנית הודעת ווצאפ 💬</h3>
+        <textarea value={whatsappTemplate} onChange={(e) => onUpdateSetting('whatsappTemplate', e.target.value)} className="w-full p-3 border rounded-xl text-sm h-48 resize-none focus:ring-2 focus:ring-pink-400 outline-none" dir="rtl" />
+        <p className="text-[10px] text-gray-400 mt-2">ניתן להשתמש ב: [שם_לקוחה], [תאריך], [שעה], [טיפולים]</p>
       </div>
     </div>
   );
