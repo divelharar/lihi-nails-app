@@ -1,15 +1,41 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle } from 'lucide-react';
 
+// --- מנגנון לכידת שגיאות (Error Boundary) מיוחד כדי שלא נראה מסך לבן ---
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 bg-red-50 text-red-600 min-h-screen font-sans" dir="ltr">
+          <h2 className="text-2xl font-bold mb-4 border-b border-red-200 pb-2">דיו, מצאנו את הבעיה! משהו פה השתבש 🛠️</h2>
+          <p className="mb-4 text-gray-700">תעתיק בבקשה את השגיאה הבאה (בתוך המסגרת הלבנה) ותשלח לי אותה בצ'אט כדי שאפתור את זה בשנייה:</p>
+          <pre className="bg-white p-4 rounded-xl shadow-sm border border-red-100 overflow-auto text-sm font-mono whitespace-pre-wrap text-left">
+            {this.state.error && this.state.error.toString()}
+          </pre>
+          <p className="mt-6 text-sm text-gray-500 text-center">הלוכד שגיאות של Vercel הציל אותנו ממסך לבן! :)</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // --- הגדרות ברירת מחדל לזמינות ---
 const DEFAULT_SCHEDULE = {
-  0: ['09:00', '10:00', '11:00', '12:00', '13:00', '16:00', '17:00'], // ראשון
-  1: ['17:00', '18:00', '19:00'], // שני
-  2: ['09:00', '10:00', '11:00', '12:00', '13:00'], // שלישי
-  3: ['09:00', '10:00', '11:00', '16:00', '17:00', '18:00'], // רביעי
-  4: ['09:00', '10:00', '11:00', '12:00', '13:00'], // חמישי
-  5: ['09:00', '10:00', '11:00', '12:00'], // שישי
-  6: [] // שבת
+  0: ['09:00', '10:00', '11:00', '12:00', '13:00', '16:00', '17:00'],
+  1: ['17:00', '18:00', '19:00'],
+  2: ['09:00', '10:00', '11:00', '12:00', '13:00'],
+  3: ['09:00', '10:00', '11:00', '16:00', '17:00', '18:00'],
+  4: ['09:00', '10:00', '11:00', '12:00', '13:00'],
+  5: ['09:00', '10:00', '11:00', '12:00'],
+  6: []
 };
 
 const ALL_POSSIBLE_HOURS = [
@@ -43,40 +69,49 @@ const DEFAULT_WHATSAPP_TEMPLATE = `היי [שם_לקוחה] המהממת! 🌸
 
 מחכה לך לזמן של פינוק! 💖`;
 
-export default function App() {
+// --- הפונקציה הראשית של האפליקציה (עטופה בלוכד שגיאות) ---
+function LihiNailsApp() {
   const [view, setView] = useState('customer');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState(false);
 
-  // שמירה מקומית (LocalStorage) 
+  // חילוץ בטוח מהזיכרון המקומי למניעת קריסות (Safe Parsing)
   const [appointments, setAppointments] = useState(() => {
     try {
       const saved = localStorage.getItem('lihi_appointments');
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
     } catch (e) { return []; }
   });
 
   const [schedule, setSchedule] = useState(() => {
     try {
       const saved = localStorage.getItem('lihi_schedule');
-      return saved ? JSON.parse(saved) : DEFAULT_SCHEDULE;
+      if (!saved) return DEFAULT_SCHEDULE;
+      const parsed = JSON.parse(saved);
+      return (parsed && typeof parsed === 'object') ? parsed : DEFAULT_SCHEDULE;
     } catch (e) { return DEFAULT_SCHEDULE; }
   });
 
   const [whatsappTemplate, setWhatsappTemplate] = useState(() => {
-    return localStorage.getItem('lihi_whatsapp') || DEFAULT_WHATSAPP_TEMPLATE;
+    try {
+      return localStorage.getItem('lihi_whatsapp') || DEFAULT_WHATSAPP_TEMPLATE;
+    } catch (e) { return DEFAULT_WHATSAPP_TEMPLATE; }
   });
 
   const [logoUrl, setLogoUrl] = useState(() => {
-    return localStorage.getItem('lihi_logo') || 'https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop';
+    try {
+      return localStorage.getItem('lihi_logo') || 'https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop';
+    } catch (e) { return 'https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop'; }
   });
 
-  // שמירה לזיכרון בכל פעם שיש שינוי
-  useEffect(() => { localStorage.setItem('lihi_appointments', JSON.stringify(appointments)); }, [appointments]);
-  useEffect(() => { localStorage.setItem('lihi_schedule', JSON.stringify(schedule)); }, [schedule]);
-  useEffect(() => { localStorage.setItem('lihi_whatsapp', whatsappTemplate); }, [whatsappTemplate]);
-  useEffect(() => { localStorage.setItem('lihi_logo', logoUrl); }, [logoUrl]);
+  // שמירה לזיכרון בכל פעם שיש שינוי (בתוך Try-Catch כדי לא לקרוס)
+  useEffect(() => { try { localStorage.setItem('lihi_appointments', JSON.stringify(appointments)); } catch(e){} }, [appointments]);
+  useEffect(() => { try { localStorage.setItem('lihi_schedule', JSON.stringify(schedule)); } catch(e){} }, [schedule]);
+  useEffect(() => { try { localStorage.setItem('lihi_whatsapp', whatsappTemplate); } catch(e){} }, [whatsappTemplate]);
+  useEffect(() => { try { localStorage.setItem('lihi_logo', logoUrl); } catch(e){} }, [logoUrl]);
 
   // פונקציות ניהול נתונים
   const handleAddAppointment = (newAppt) => {
@@ -222,6 +257,9 @@ export default function App() {
   );
 }
 
+// ==========================================
+//              צד לקוח (Customer View)
+// ==========================================
 function CustomerView({ schedule, appointments, onBook, logoUrl }) {
   const [step, setStep] = useState(1); 
   const [selectedServices, setSelectedServices] = useState([]);
@@ -283,7 +321,7 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
         if (appt.blockedHours) {
           bookedHours.push(...appt.blockedHours);
         } else {
-          bookedHours.push(appt.time);
+          if (appt.time) bookedHours.push(appt.time);
         }
       }
     });
@@ -814,7 +852,7 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
   };
 
   const sendWhatsAppConfirmation = (appt) => {
-    let cleanPhone = appt.phone.replace(/\D/g, '');
+    let cleanPhone = appt.phone ? appt.phone.replace(/\D/g, '') : '';
     if (cleanPhone.startsWith('0')) {
       cleanPhone = '972' + cleanPhone.substring(1);
     }
@@ -822,12 +860,12 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
     const servicesText = appt.services ? appt.services.map(s => s.label.split('-')[0].trim()).join(', ') : appt.service;
     const extrasText = appt.extras && appt.extras.length > 0 ? `\n➕ תוספות: ${appt.extras.map(e => e.label.split('-')[0].trim()).join(', ')}` : '';
     const fullTreatmentsText = `${servicesText}${extrasText}`;
-    const formattedDate = appt.date.split('-').reverse().join('/');
+    const formattedDate = appt.date ? appt.date.split('-').reverse().join('/') : '';
 
     let message = whatsappTemplate
-      .replace(/\[שם_לקוחה\]/g, appt.name)
+      .replace(/\[שם_לקוחה\]/g, appt.name || '')
       .replace(/\[תאריך\]/g, formattedDate)
-      .replace(/\[שעה\]/g, appt.time)
+      .replace(/\[שעה\]/g, appt.time || '')
       .replace(/\[טיפולים\]/g, fullTreatmentsText);
 
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
@@ -845,9 +883,11 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
   const handleSaveEdit = () => {
     const totalH = editData.services.reduce((sum, s) => sum + s.hours, 0);
     const blockedHours = [];
-    const [baseH] = editData.time.split(':').map(Number);
-    for (let i = 0; i < totalH; i++) {
-      blockedHours.push(`${(baseH + i).toString().padStart(2, '0')}:00`);
+    if (editData.time) {
+      const [baseH] = editData.time.split(':').map(Number);
+      for (let i = 0; i < totalH; i++) {
+        blockedHours.push(`${(baseH + i).toString().padStart(2, '0')}:00`);
+      }
     }
 
     const updatedAppt = {
@@ -887,22 +927,22 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
               <div className="space-y-3 mb-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">שם לקוחה</label>
-                  <input type="text" value={editData.name} onChange={e => setEditData({...editData, name: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-pink-400" />
+                  <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-pink-400" />
                 </div>
                 
                 <div>
                   <label className="block text-xs font-bold text-gray-600 mb-1">טלפון</label>
-                  <input type="tel" value={editData.phone} onChange={e => setEditData({...editData, phone: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-pink-400 text-right" dir="ltr" />
+                  <input type="tel" value={editData.phone || ''} onChange={e => setEditData({...editData, phone: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-pink-400 text-right" dir="ltr" />
                 </div>
 
                 <div className="flex gap-2">
                   <div className="flex-1">
                     <label className="block text-xs font-bold text-gray-600 mb-1">תאריך</label>
-                    <input type="date" value={editData.date} onChange={e => setEditData({...editData, date: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-pink-400 text-left" dir="ltr" />
+                    <input type="date" value={editData.date || ''} onChange={e => setEditData({...editData, date: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-pink-400 text-left" dir="ltr" />
                   </div>
                   <div className="flex-1">
                     <label className="block text-xs font-bold text-gray-600 mb-1">שעה</label>
-                    <input type="time" value={editData.time} onChange={e => setEditData({...editData, time: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-pink-400 text-left" dir="ltr" />
+                    <input type="time" value={editData.time || ''} onChange={e => setEditData({...editData, time: e.target.value})} className="w-full p-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-pink-400 text-left" dir="ltr" />
                   </div>
                 </div>
 
@@ -993,10 +1033,10 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
 
               <div className="flex items-center gap-4 text-sm text-gray-500 mt-2">
                 <span className="flex items-center gap-1 font-semibold text-pink-600">
-                  <Calendar size={14} /> {appt.date.split('-').reverse().join('/')}
+                  <Calendar size={14} /> {appt.date ? appt.date.split('-').reverse().join('/') : ''}
                 </span>
                 <span className="flex items-center gap-1 font-semibold text-pink-600">
-                  <Clock size={14} /> {appt.time} - {appt.totalHours ? `${parseInt(appt.time.split(':')[0]) + appt.totalHours}:00` : ''}
+                  <Clock size={14} /> {appt.time} {appt.time && appt.totalHours ? `- ${parseInt(appt.time.split(':')[0]) + appt.totalHours}:00` : ''}
                 </span>
               </div>
               <div className="mt-2 text-sm text-gray-600">
@@ -1158,5 +1198,13 @@ function AdminScheduleSettings({ schedule, logoUrl, whatsappTemplate, onUpdateSe
         </div>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <LihiNailsApp />
+    </ErrorBoundary>
   );
 }
