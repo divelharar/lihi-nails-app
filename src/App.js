@@ -93,8 +93,17 @@ function LihiNailsApp() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    signInAnonymously(auth).catch(err => console.error(err));
-    const unsub = onAuthStateChanged(auth, u => setUser(u));
+    signInAnonymously(auth).catch(err => {
+      console.error(err);
+      setUser({ uid: 'fallback-user' });
+    });
+    const unsub = onAuthStateChanged(auth, u => {
+      if (u) {
+        setUser(u);
+      } else {
+        setUser({ uid: 'fallback-user' });
+      }
+    });
     return () => unsub();
   }, []);
 
