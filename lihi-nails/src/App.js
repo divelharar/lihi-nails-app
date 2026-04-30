@@ -1,14 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle } from 'lucide-react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
-
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- הגדרות ברירת מחדל לזמינות ---
 const DEFAULT_SCHEDULE = {
@@ -53,101 +44,57 @@ const DEFAULT_WHATSAPP_TEMPLATE = `היי [שם_לקוחה] המהממת! 🌸
 מחכה לך לזמן של פינוק! 💖`;
 
 export default function App() {
-  // --- ניהול מצב גלובלי ---
-  const [view, setView] = useState('customer'); // 'customer', 'auth', או 'admin'
+  const [view, setView] = useState('customer');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState(false);
 
-  const [user, setUser] = useState(null);
-  const [loadingData, setLoadingData] = useState(true);
-
-  const [appointments, setAppointments] = useState([]);
-  const [schedule, setSchedule] = useState(DEFAULT_SCHEDULE);
-  const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
-  const [logoUrl, setLogoUrl] = useState('https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop');
-
-  // 1. אתחול משתמש ב-Firebase
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Auth error:", err);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
-
-  // 2. משיכת נתונים בזמן אמת מ-Firestore
-  useEffect(() => {
-    if (!user) return;
-
-    const apptQuery = collection(db, 'artifacts', appId, 'public', 'data', 'appointments');
-    const unsubAppts = onSnapshot(apptQuery, (snapshot) => {
-      const loadedAppts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAppointments(loadedAppts);
-    }, (err) => console.error(err));
-
-    const settingsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main');
-    const unsubSettings = onSnapshot(settingsDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.schedule) setSchedule(data.schedule);
-        if (data.logoUrl) setLogoUrl(data.logoUrl);
-        if (data.whatsappTemplate) setWhatsappTemplate(data.whatsappTemplate);
-      } else {
-        setDoc(settingsDocRef, {
-          schedule: DEFAULT_SCHEDULE,
-          logoUrl: 'https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop',
-          whatsappTemplate: DEFAULT_WHATSAPP_TEMPLATE
-        });
-      }
-      setLoadingData(false);
-    }, (err) => console.error(err));
-
-    return () => {
-      unsubAppts();
-      unsubSettings();
-    };
-  }, [user]);
-
-  // פונקציות לכתיבה בענן
-  const handleAddAppointment = async (newAppt) => {
-    if (!user) return;
+  // --- שמירה מקומית (LocalStorage) לטובת עלייה חלקה לאוויר ---
+  const [appointments, setAppointments] = useState(() => {
     try {
-      const collRef = collection(db, 'artifacts', appId, 'public', 'data', 'appointments');
-      await addDoc(collRef, newAppt);
-    } catch(e) { console.error("Error adding appt", e); }
+      const saved = localStorage.getItem('lihi_appointments');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
+  });
+
+  const [schedule, setSchedule] = useState(() => {
+    try {
+      const saved = localStorage.getItem('lihi_schedule');
+      return saved ? JSON.parse(saved) : DEFAULT_SCHEDULE;
+    } catch (e) { return DEFAULT_SCHEDULE; }
+  });
+
+  const [whatsappTemplate, setWhatsappTemplate] = useState(() => {
+    return localStorage.getItem('lihi_whatsapp') || DEFAULT_WHATSAPP_TEMPLATE;
+  });
+
+  const [logoUrl, setLogoUrl] = useState(() => {
+    return localStorage.getItem('lihi_logo') || 'https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop';
+  });
+
+  // שמירה לזיכרון בכל פעם שיש שינוי
+  useEffect(() => { localStorage.setItem('lihi_appointments', JSON.stringify(appointments)); }, [appointments]);
+  useEffect(() => { localStorage.setItem('lihi_schedule', JSON.stringify(schedule)); }, [schedule]);
+  useEffect(() => { localStorage.setItem('lihi_whatsapp', whatsappTemplate); }, [whatsappTemplate]);
+  useEffect(() => { localStorage.setItem('lihi_logo', logoUrl); }, [logoUrl]);
+
+  // פונקציות ניהול נתונים
+  const handleAddAppointment = (newAppt) => {
+    setAppointments([...appointments, { ...newAppt, id: Date.now().toString() }]);
   };
 
-  const handleDeleteAppointment = async (id) => {
-    if (!user) return;
-    try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', id));
-    } catch(e) { console.error("Error deleting appt", e); }
+  const handleDeleteAppointment = (id) => {
+    setAppointments(appointments.filter(a => a.id !== id));
   };
 
-  const handleUpdateAppointment = async (id, updatedData) => {
-    if (!user) return;
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', id), updatedData);
-    } catch(e) { console.error("Error updating appt", e); }
+  const handleUpdateAppointment = (id, updatedData) => {
+    setAppointments(appointments.map(a => a.id === id ? updatedData : a));
   };
 
-  const handleUpdateSetting = async (field, value) => {
-    if (!user) return;
-    try {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main'), {
-        [field]: value
-      }, { merge: true });
-    } catch(e) { console.error("Error updating setting", e); }
+  const handleUpdateSetting = (field, value) => {
+    if (field === 'schedule') setSchedule(value);
+    if (field === 'logoUrl') setLogoUrl(value);
+    if (field === 'whatsappTemplate') setWhatsappTemplate(value);
   };
 
   const handleAdminLogin = () => {
@@ -162,24 +109,13 @@ export default function App() {
     }
   };
 
-  if (loadingData) {
-    return (
-      <div className="min-h-screen bg-rose-50 flex flex-col items-center justify-center font-sans" dir="rtl">
-        <div className="animate-bounce mb-4 text-pink-500">
-          <Heart size={48} fill="currentColor" />
-        </div>
-        <h2 className="text-xl font-bold text-gray-800">טוען את היומן של Lihi Nails... 💅</h2>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen font-sans text-right bg-cover bg-center bg-fixed relative" dir="rtl" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1522337660859-02fbefca4702?q=80&w=2069&auto=format&fit=crop')" }}>
-      {/* שכבת שקיפות כדי שהטקסט יהיה קריא והתמונה תיתן רק אווירה יוקרתית */}
+      {/* שכבת שקיפות */}
       <div className="absolute inset-0 bg-rose-50/85 backdrop-blur-sm"></div>
       
       <div className="relative z-10">
-        {/* כותרת עליונה משותפת */}
+        {/* כותרת עליונה */}
         <header className="bg-white/90 backdrop-blur-md shadow-sm sticky top-0 z-20">
           <div className="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
             <div className="flex items-center gap-2">
@@ -296,13 +232,12 @@ export default function App() {
 //              צד לקוח (Customer View)
 // ==========================================
 function CustomerView({ schedule, appointments, onBook, logoUrl }) {
-  const [step, setStep] = useState(1); // 1: בחירת טיפולים, 2: תאריך ושעה, 3: פרטים, 4: אישור
+  const [step, setStep] = useState(1); 
   const [selectedServices, setSelectedServices] = useState([]);
   const [selectedExtras, setSelectedExtras] = useState([]);
   const [isExtrasOpen, setIsExtrasOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
-  
   const [formData, setFormData] = useState({ name: '', phone: '', notes: '' });
 
   const dateContainerRef = useRef(null);
@@ -325,13 +260,11 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
 
   const totalHours = selectedServices.reduce((sum, s) => sum + s.hours, 0);
 
-  // יצירת רשימת 90 הימים הבאים לבחירה (ללא ימי שבת)
   const getNextDays = () => {
     const days = [];
     for (let i = 0; i < 90; i++) {
       const d = new Date();
       d.setDate(d.getDate() + i);
-      // יום שבת הוא אינדקס 6 ב-JavaScript. אנחנו מוסיפים רק אם זה לא שבת.
       if (d.getDay() !== 6) { 
         days.push(d);
       }
@@ -341,36 +274,31 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
 
   const scrollDates = (direction) => {
     if (dateContainerRef.current) {
-      // בגלל שאנחנו ב-RTL (ימין לשמאל), גלילה "קדימה" לימים הבאים (שמאלה) היא בערך שלילי
       const scrollAmount = direction === 'next' ? -200 : 200;
       dateContainerRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
     }
   };
 
-  // חישוב שעות פנויות לפי משך הזמן הכולל של הטיפולים שנבחרו
   const getAvailableHoursForDate = (dateString) => {
     if (!dateString) return [];
     const dateObj = new Date(dateString);
     const dayOfWeek = dateObj.getDay();
     
-    // כל השעות שהוגדרו לאותו יום בשבוע
     const hoursForDay = schedule[dayOfWeek] || [];
     
-    // איסוף כל השעות שתפוסות באותו תאריך מכל התורים הקיימים
     const bookedHours = [];
     appointments.forEach(appt => {
       if (appt.date === dateString) {
         if (appt.blockedHours) {
           bookedHours.push(...appt.blockedHours);
         } else {
-          bookedHours.push(appt.time); // תמיכה לאחור בתורים ישנים
+          bookedHours.push(appt.time);
         }
       }
     });
       
     const freeHours = hoursForDay.filter(hour => !bookedHours.includes(hour));
 
-    // סינון: מציג רק שעות התחלה שיש מהן מספיק שעות פנויות ברצף
     const validStartTimes = [];
     freeHours.forEach(startHour => {
       let isValid = true;
@@ -394,14 +322,13 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
 
   const handleDateSelect = (dateString) => {
     setSelectedDate(dateString);
-    setSelectedTime(''); // איפוס שעה בשינוי תאריך
+    setSelectedTime('');
   };
 
   const submitBooking = (e) => {
     e.preventDefault();
     if (!selectedDate || !selectedTime || !formData.name || !formData.phone || selectedServices.length === 0) return;
     
-    // חישוב המערך של כל השעות שהתור הזה יתפוס
     const blockedHours = [];
     const [baseH] = selectedTime.split(':').map(Number);
     for (let i = 0; i < totalHours; i++) {
@@ -417,16 +344,14 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
       totalHours,
       ...formData
     });
-    setStep(4); // מעבר למסך ההצלחה
+    setStep(4);
   };
 
-  // יצירת קישור לגוגל יומן (לפי זמן מקומי)
   const generateGoogleCalendarLink = () => {
     const d = new Date(selectedDate);
     const [hours, minutes] = selectedTime.split(':');
     d.setHours(parseInt(hours), parseInt(minutes), 0);
-    
-    const endD = new Date(d.getTime() + totalHours * 60 * 60 * 1000); // שימוש בזמן הכולל של הטיפולים
+    const endD = new Date(d.getTime() + totalHours * 60 * 60 * 1000); 
     
     const pad = n => n.toString().padStart(2, '0');
     const formatForGcal = (date) => `${date.getFullYear()}${pad(date.getMonth()+1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
@@ -439,16 +364,13 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${startStr}/${endStr}&details=${details}`;
   };
 
-  // יצירת קובץ ליומן של אפל (ics)
   const generateAppleCalendarLink = () => {
     const d = new Date(selectedDate);
     const [hours, minutes] = selectedTime.split(':');
     d.setHours(parseInt(hours), parseInt(minutes), 0);
-    
-    const endD = new Date(d.getTime() + totalHours * 60 * 60 * 1000); // שימוש בזמן הכולל של הטיפולים
+    const endD = new Date(d.getTime() + totalHours * 60 * 60 * 1000);
     
     const pad = n => n.toString().padStart(2, '0');
-    // פורמט נכון לקבצי ics (זמן מקומי)
     const formatForICS = (date) => `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
     
     const startStr = formatForICS(d);
@@ -466,17 +388,14 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
       'END:VCALENDAR'
     ].join('\n');
 
-    // יצירת קובץ וירטואלי להורדה
     const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
     return URL.createObjectURL(blob);
   };
 
   return (
     <div className="flex flex-col h-full bg-transparent pb-10">
-      {/* Hero Section */}
       {step === 1 && (
         <div className="bg-gradient-to-r from-pink-600 to-pink-500 text-white p-6 pb-8 rounded-b-[40px] shadow-lg relative overflow-hidden border-b-[3px] border-pink-300">
-          {/* עיגולי רקע עיצוביים */}
           <div className="absolute top-[-50px] right-[-50px] w-32 h-32 bg-pink-400 rounded-full opacity-50 blur-2xl"></div>
           <div className="absolute bottom-[-30px] left-[-20px] w-24 h-24 bg-pink-400 rounded-full opacity-50 blur-xl"></div>
           
@@ -490,7 +409,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
         </div>
       )}
 
-      {/* Step 1: בחירת טיפולים */}
       {step === 1 && (
         <div className="px-5 mt-6 fade-in h-full flex flex-col">
           <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -524,7 +442,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
               );
             })}
 
-            {/* אזור התוספות - חלון נפתח */}
             <div className="mt-6 border-t border-gray-200 pt-4">
               <button 
                 onClick={() => setIsExtrasOpen(!isExtrasOpen)}
@@ -581,7 +498,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
             </div>
           )}
 
-          {/* מדיניות ביטולים */}
           <div className="mt-8 mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl text-center shadow-sm">
             <p className="text-xs text-rose-800 font-medium leading-relaxed">
               <strong>שימי לב:</strong> במידה ויש צורך לבטל או לשנות תור, יש לעשות זאת לפחות 24 שעות מראש. <br/>
@@ -592,7 +508,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
         </div>
       )}
 
-      {/* Step 2: תאריך ושעה */}
       {step === 2 && (
         <div className="px-5 mt-6 fade-in">
           <button 
@@ -611,21 +526,18 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
               <button 
                 onClick={() => scrollDates('prev')} 
                 className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-pink-50 text-gray-600 hover:text-pink-600 hover:border-pink-200 transition-colors shadow-sm"
-                title="ימים קודמים"
               >
                 <ChevronRight size={18} />
               </button>
               <button 
                 onClick={() => scrollDates('next')} 
                 className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-pink-50 text-gray-600 hover:text-pink-600 hover:border-pink-200 transition-colors shadow-sm"
-                title="ימים הבאים"
               >
                 <ChevronLeft size={18} />
               </button>
             </div>
           </div>
           
-          {/* בחירת תאריך (גלילה אופקית של הימים הקרובים) */}
           <div 
             ref={dateContainerRef}
             className="flex overflow-x-auto gap-3 pb-4 hide-scrollbar snap-x scroll-smooth"
@@ -653,7 +565,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
             })}
           </div>
 
-          {/* בחירת שעה */}
           {selectedDate && (
             <div className="mt-6 animate-slide-up">
               <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -686,7 +597,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
             </div>
           )}
 
-          {/* כפתור המשך */}
           {selectedDate && selectedTime && (
             <div className="mt-8 animate-slide-up">
               <button 
@@ -700,7 +610,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
         </div>
       )}
 
-      {/* Step 3: פרטים אישיים */}
       {step === 3 && (
         <div className="p-6 fade-in h-full flex flex-col">
           <button 
@@ -770,7 +679,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
         </div>
       )}
 
-      {/* Step 4: מסך הצלחה מרהיב */}
       {step === 4 && (
         <div className="p-6 h-full flex flex-col items-center justify-center text-center fade-in bg-white/90">
           <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6 text-green-500 shadow-inner">
@@ -781,7 +689,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
           <p className="text-xl text-pink-600 font-bold mb-4">התור שלך נקבע בהצלחה 💅✨</p>
           
           <div className="bg-rose-50/90 rounded-2xl p-6 w-full mb-8 border border-rose-100 relative overflow-hidden shadow-sm">
-             {/* דוגמה עיצובית */}
              <div className="absolute -right-4 -top-4 text-pink-200 opacity-40">
                <Heart size={80} fill="currentColor" />
              </div>
@@ -812,7 +719,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
               download="LihiNails_Appointment.ics"
               className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-3 shadow-lg shadow-gray-300"
             >
-              {/* אייקון תפוח של אפל */}
               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 384 512" fill="currentColor">
                 <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/>
               </svg>
@@ -837,7 +743,6 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
         </div>
       )}
 
-      {/* הוספת מחלקות CSS לטובת אנימציות פשוטות בלי קבצים חיצוניים */}
       <style dangerouslySetInnerHTML={{__html: `
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -854,17 +759,15 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
 //              צד מנהלת (Admin View)
 // ==========================================
 function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdateSetting, onDeleteAppointment, onUpdateAppointment }) {
-  const [activeTab, setActiveTab] = useState('appointments'); // 'appointments' | 'settings'
+  const [activeTab, setActiveTab] = useState('appointments');
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      {/* Admin Header */}
       <div className="bg-gray-900 text-white p-5 rounded-b-3xl">
         <h2 className="text-2xl font-bold mb-1">היי ליהיא! 👑</h2>
         <p className="text-gray-400 text-sm">ניהול התורים והשעות של Lihi Nails</p>
       </div>
 
-      {/* Tabs */}
       <div className="flex px-4 mt-6 gap-2">
         <button 
           onClick={() => setActiveTab('appointments')}
@@ -884,7 +787,6 @@ function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdate
         </button>
       </div>
 
-      {/* Tab Content */}
       <div className="p-4 flex-1 overflow-y-auto">
         {activeTab === 'appointments' && (
           <AdminAppointmentsList 
@@ -908,11 +810,9 @@ function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdate
 }
 
 function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppointment, whatsappTemplate }) {
-  // ניהול מצב לעריכת תור
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState(null);
 
-  // מיון תורים לפי תאריך ושעה
   const sortedAppointments = [...appointments].sort((a, b) => {
     const dateA = new Date(`${a.date}T${a.time}`);
     const dateB = new Date(`${b.date}T${b.time}`);
@@ -926,7 +826,6 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
   };
 
   const sendWhatsAppConfirmation = (appt) => {
-    // מנקה את מספר הטלפון (מסיר מקפים או רווחים) ומוסיף קידומת של ישראל 972
     let cleanPhone = appt.phone.replace(/\D/g, '');
     if (cleanPhone.startsWith('0')) {
       cleanPhone = '972' + cleanPhone.substring(1);
@@ -937,7 +836,6 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
     const fullTreatmentsText = `${servicesText}${extrasText}`;
     const formattedDate = appt.date.split('-').reverse().join('/');
 
-    // החלפת מילות הקוד בתבנית בפרטי התור האמיתיים
     let message = whatsappTemplate
       .replace(/\[שם_לקוחה\]/g, appt.name)
       .replace(/\[תאריך\]/g, formattedDate)
@@ -949,7 +847,6 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
 
   const handleEditClick = (appt) => {
     setEditingId(appt.id);
-    // ממירים פורמט ישן לחדש במידת הצורך בעריכה
     let servicesForEdit = appt.services || [];
     if (!appt.services && appt.service) {
       servicesForEdit = [{ id: 'old', label: appt.service, hours: 1 }];
@@ -994,7 +891,6 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
   return (
     <div className="space-y-4 pb-10">
       {sortedAppointments.map((appt) => {
-        // אם התור הזה במצב עריכה עכשיו - נציג טופס
         if (editingId === appt.id) {
           return (
             <div key={appt.id} className="bg-pink-50 p-4 rounded-2xl shadow-sm border border-pink-300 relative">
@@ -1089,10 +985,8 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
           );
         }
 
-        // --- תצוגת התור הרגילה ---
         return (
           <div key={appt.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-start relative overflow-hidden group">
-            {/* מחוון צבע בצד */}
             <div className="absolute right-0 top-0 bottom-0 w-1.5 bg-pink-500"></div>
             
             <div className="pr-2">
@@ -1103,7 +997,6 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
                 </span>
               </div>
               
-              {/* הצגת תוספות בכרטיסייה של המנהלת */}
               {appt.extras && appt.extras.length > 0 && (
                 <div className="text-xs text-gray-500 mt-1 font-medium bg-gray-50 inline-block px-2 py-1 rounded">
                   <span className="text-pink-500">➕ תוספות:</span> {appt.extras.map(e => e.label.split('-')[0].trim()).join(', ')}
@@ -1187,7 +1080,7 @@ function AdminScheduleSettings({ schedule, logoUrl, whatsappTemplate, onUpdateSe
       <h3 className="font-bold text-gray-800 mb-3">בחרי יום לעריכה:</h3>
       <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
         {DAYS_OF_WEEK.map((dayName, index) => (
-          index !== 6 && ( // מסתיר את יום שבת מפאנל הניהול
+          index !== 6 && ( 
             <button
               key={index}
               onClick={() => setSelectedDay(index)}
@@ -1255,7 +1148,6 @@ function AdminScheduleSettings({ schedule, logoUrl, whatsappTemplate, onUpdateSe
         </div>
       </div>
 
-      {/* הגדרת תבנית הודעת הווצאפ */}
       <div className="mt-6 bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
         <h3 className="font-bold text-gray-800 mb-4">תבנית הודעת ווצאפ 💬</h3>
         <div>
