@@ -1,0 +1,20 @@
+{
+  "short_name": "Lihi Nails",
+  "name": "Lihi Nails - אפליקציית זימון תורים",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=192&auto=format&fit=crop",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=512&auto=format&fit=crop",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#db2777",
+  "background_color": "#fdf2f8"
+}
