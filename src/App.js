@@ -1,29 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle, AlertCircle, Bell, BarChart3, Megaphone, Copy, Check, TrendingUp, Plus, Trash2, CalendarOff } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-// --- מנגנון חכם לזיהוי השרת (Vercel או סביבת פיתוח) ---
-const isVercel = typeof __firebase_config === 'undefined';
-let firebaseConfig;
-
-if (!isVercel) {
-  try { firebaseConfig = JSON.parse(__firebase_config); } catch (e) {}
-}
-
-if (!firebaseConfig) {
-  // המפתחות המקוריים שלך ב-Firebase
-  firebaseConfig = {
-    apiKey: "AIzaSyDlXeIC2YiBFk2uq_b81AQljiT-Bmf-QgI",
-    authDomain: "lihi-nails.firebaseapp.com",
-    projectId: "lihi-nails",
-    storageBucket: "lihi-nails.firebasestorage.app",
-    messagingSenderId: "504139844570",
-    appId: "1:504139844570:web:79e7779b643c7acf464ee3"
-  };
-}
+// --- החיבור המקורי והנכון שלך ל-Firebase ---
+const firebaseConfig = {
+  apiKey: "AIzaSyDlXeIC2YiBFk2uq_b81AQljiT-Bmf-QgI",
+  authDomain: "lihi-nails.firebaseapp.com",
+  projectId: "lihi-nails",
+  storageBucket: "lihi-nails.firebasestorage.app",
+  messagingSenderId: "504139844570",
+  appId: "1:504139844570:web:79e7779b643c7acf464ee3"
+};
 
 let app, auth, db;
 try {
@@ -33,19 +23,6 @@ try {
 } catch (e) {
   console.error("Firebase Init Error:", e);
 }
-
-// פונקציות עזר לניתוב חכם של מסד הנתונים
-const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-const getApptsCollection = () => {
-  return isVercel ? collection(db, 'appointments') : collection(db, 'artifacts', currentAppId, 'public', 'data', 'appointments');
-};
-const getSettingsDoc = () => {
-  return isVercel ? doc(db, 'settings', 'main') : doc(db, 'artifacts', currentAppId, 'public', 'data', 'settings', 'main');
-};
-const getApptDoc = (id) => {
-  return isVercel ? doc(db, 'appointments', id) : doc(db, 'artifacts', currentAppId, 'public', 'data', 'appointments', id);
-};
 
 // --- הגדרות ברירת מחדל לזמינות ---
 const DEFAULT_SCHEDULE = {
@@ -92,7 +69,35 @@ const DEFAULT_WHATSAPP_TEMPLATE = `היי [שם_לקוחה] המהממת! 🌸
 
 const DEFAULT_LOGO_URL = 'https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop';
 
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 bg-red-50 text-red-600 min-h-screen" dir="ltr">
+          <h2 className="text-2xl font-bold mb-4">משהו השתבש 🛠️</h2>
+          <pre className="bg-white p-4 rounded-xl shadow-sm text-sm font-mono overflow-auto">{this.state.error?.toString()}</pre>
+          <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg">רענן דף</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <LihiNailsApp />
+    </ErrorBoundary>
+  );
+}
+
+function LihiNailsApp() {
   const [view, setView] = useState('customer');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [pin, setPin] = useState('');
@@ -111,31 +116,44 @@ export default function App() {
   const [logoUrl, setLogoUrl] = useState(DEFAULT_LOGO_URL);
 
   useEffect(() => {
+    if (!auth) {
+      setLoadingData(false);
+      return;
+    }
+    
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        await signInAnonymously(auth);
       } catch (err) {
         console.error("Auth error:", err);
       }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+    
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      if (u) {
+        setUser(u);
+      } else {
+        setTimeout(() => { if (!user) setUser({ uid: 'temp' }); }, 2000);
+      }
+    });
+    
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !db) return;
 
-    const unsubAppts = onSnapshot(getApptsCollection(), (snapshot) => {
+    const unsubAppts = onSnapshot(collection(db, 'appointments'), (snapshot) => {
       const loadedAppts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAppointments(loadedAppts);
-    }, (err) => console.error(err));
+      setLoadingData(false);
+    }, (err) => {
+      console.error(err);
+      setLoadingData(false);
+    });
 
-    const unsubSettings = onSnapshot(getSettingsDoc(), (docSnap) => {
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'main'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.schedule) setSchedule(data.schedule);
@@ -146,7 +164,7 @@ export default function App() {
         if (data.blockedDates) setBlockedDates(data.blockedDates);
         if (data.blockedTimeSlots) setBlockedTimeSlots(data.blockedTimeSlots);
       } else {
-        setDoc(getSettingsDoc(), {
+        setDoc(doc(db, 'settings', 'main'), {
           schedule: DEFAULT_SCHEDULE,
           services: DEFAULT_SERVICES,
           extras: DEFAULT_EXTRAS,
@@ -156,7 +174,6 @@ export default function App() {
           whatsappTemplate: DEFAULT_WHATSAPP_TEMPLATE
         });
       }
-      setLoadingData(false);
     }, (err) => console.error(err));
 
     return () => {
@@ -166,30 +183,30 @@ export default function App() {
   }, [user]);
 
   const handleAddAppointment = async (newAppt) => {
-    if (!user) return;
+    if (!user || !db) return;
     try {
-      await addDoc(getApptsCollection(), { ...newAppt, createdAt: Date.now() });
+      await addDoc(collection(db, 'appointments'), { ...newAppt, createdAt: Date.now() });
     } catch(e) { console.error("Error adding appt", e); }
   };
 
   const handleDeleteAppointment = async (id) => {
-    if (!user) return;
+    if (!user || !db) return;
     try {
-      await deleteDoc(getApptDoc(id));
+      await deleteDoc(doc(db, 'appointments', id));
     } catch(e) { console.error("Error deleting appt", e); }
   };
 
   const handleUpdateAppointment = async (id, updatedData) => {
-    if (!user) return;
+    if (!user || !db) return;
     try {
-      await updateDoc(getApptDoc(id), updatedData);
+      await updateDoc(doc(db, 'appointments', id), updatedData);
     } catch(e) { console.error("Error updating appt", e); }
   };
 
   const handleUpdateSetting = async (field, value) => {
-    if (!user) return;
+    if (!user || !db) return;
     try {
-      await setDoc(getSettingsDoc(), {
+      await setDoc(doc(db, 'settings', 'main'), {
         [field]: value
       }, { merge: true });
     } catch(e) { console.error("Error updating setting", e); }
@@ -207,7 +224,7 @@ export default function App() {
     }
   };
 
-  if (loadingData) {
+  if (loadingData && !user) {
     return (
       <div className="min-h-screen bg-rose-50 flex flex-col items-center justify-center font-sans" dir="rtl">
         <div className="animate-bounce mb-4 text-pink-500">
@@ -218,6 +235,9 @@ export default function App() {
     );
   }
 
+  const safeLogoUrl = logoUrl && logoUrl.trim() !== '' ? logoUrl : DEFAULT_LOGO_URL;
+  const handleImageError = (e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; };
+
   return (
     <div className="min-h-screen font-sans text-right bg-cover bg-center bg-fixed relative" dir="rtl" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1522337660859-02fbefca4702?q=80&w=2069&auto=format&fit=crop')" }}>
       <div className="absolute inset-0 bg-rose-50/85 backdrop-blur-sm"></div>
@@ -226,7 +246,7 @@ export default function App() {
         <header className="bg-white/90 backdrop-blur-md shadow-sm sticky top-0 z-20">
           <div className="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <img src={logoUrl || DEFAULT_LOGO_URL} onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; }} alt="לוגו Lihi Nails" className="w-12 h-12 rounded-full object-cover border-2 border-pink-200 shadow-sm bg-white" />
+              <img src={safeLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-12 h-12 rounded-full object-cover border-2 border-pink-200 shadow-sm bg-white" />
               <div>
                 <h1 className="text-xl font-bold text-gray-900 leading-tight">Lihi Nails 💅✨</h1>
                 <p className="text-xs text-pink-600 font-bold">האומנות שלי, הציפורניים שלך 💎</p>
@@ -262,13 +282,13 @@ export default function App() {
               extras={extras || []}
               appointments={appointments} 
               onBook={handleAddAppointment} 
-              logoUrl={logoUrl}
+              logoUrl={safeLogoUrl}
             />
           )}
           
           {view === 'auth' && (
             <div className="p-8 flex flex-col items-center justify-center h-full min-h-[60vh] text-center fade-in bg-white/90">
-              <img src={logoUrl || DEFAULT_LOGO_URL} onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; }} alt="לוגו Lihi Nails" className="w-24 h-24 rounded-full border-4 border-pink-100 shadow-md mb-6 object-cover bg-white" />
+              <img src={safeLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-24 h-24 rounded-full border-4 border-pink-100 shadow-md mb-6 object-cover bg-white" />
               <h2 className="text-2xl font-bold text-gray-800 mb-2">כניסת מנהלת 👑</h2>
               <p className="text-gray-500 mb-8 text-sm">היי ליהיא! הקלידי את קוד הגישה שלך כדי לנהל את התורים:</p>
               
@@ -314,7 +334,7 @@ export default function App() {
               services={services || []}
               extras={extras || []}
               appointments={appointments} 
-              logoUrl={logoUrl}
+              logoUrl={safeLogoUrl}
               whatsappTemplate={whatsappTemplate}
               onUpdateSetting={handleUpdateSetting}
               onDeleteAppointment={handleDeleteAppointment}
@@ -476,19 +496,23 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
             let subTextClass = "text-[10px] z-10 leading-none mt-0.5 ";
 
             if (isSelected) {
+              // בחירה
               cellClass += "bg-pink-600 border-2 border-pink-600 shadow-md transform scale-105";
               textClass += "text-white";
               subText = "נבחר";
               subTextClass += "text-pink-100 font-medium";
             } else if (isPast || isClosedDay) {
+              // ימים שעברו או סגורים קבוע
               cellClass += "opacity-40 cursor-not-allowed border border-transparent";
               textClass += "text-gray-400 font-normal";
             } else if (isBlocked || isFull) {
+              // תפוס או חסום על ידי המנהלת
               cellClass += "bg-gray-700 border-2 border-gray-700";
               textClass += "text-white";
               subText = isBlocked ? "סגור" : "תפוס";
               subTextClass += "text-gray-300 font-medium";
             } else {
+              // פנוי להזמנה
               cellClass += "bg-pink-50 border-2 border-pink-400 hover:bg-pink-100 cursor-pointer shadow-sm";
               textClass += "text-pink-800";
               subText = "פנוי";
@@ -601,6 +625,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           
           <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-pink-500" size={20} /> מתי נוח לך?</h3>
           
+          {/* הלוח שנה החדש והמעודכן */}
           {renderCalendar()}
 
           {selectedDate && (
@@ -636,7 +661,8 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <form onSubmit={submitBooking} className="space-y-5 flex-1 pb-4 text-right" dir="rtl">
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">שם מלא <span className="text-red-500">*</span></label>
-              <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-pink-400 outline-none transition-all" placeholder="איך קוראים לך מהממת?" dir="rtl" />
+              {/* === התיקון שביקשת נמצא כאן! (הורדתי את ה"מהממת") === */}
+              <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-pink-400 outline-none transition-all" placeholder="איך קוראים לך?" dir="rtl" />
             </div>
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">טלפון <span className="text-red-500">*</span></label>
@@ -733,7 +759,6 @@ function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras,
           </button>
         </div>
 
-        {/* חצים מתוקנים לעברית */}
         <button onClick={() => tabsRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
           <ChevronLeft size={18} />
         </button>
@@ -837,7 +862,7 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
                         {isNew && <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-normal animate-pulse">חדש!</span>}
                       </div>
                       <div className="text-xs mt-1 font-semibold text-pink-600 bg-pink-100 inline-block px-2 py-1 rounded">
-                        {appt.services && appt.services.map(s => s.label.split('-')[0].trim()).join(' + ')}
+                        {(appt.services || []).map(s => s.label.split('-')[0].trim()).join(' + ')}
                       </div>
                       <div className="mt-2 text-sm text-gray-600 flex items-center gap-2">
                         📞 <a href={`tel:${appt.phone}`} className="hover:underline" dir="ltr">{appt.phone}</a>
@@ -1091,6 +1116,7 @@ function AdminBroadcast({ appointments }) {
 function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoUrl, whatsappTemplate, onUpdateSetting }) {
   const [selectedDay, setSelectedDay] = useState(0);
   const [dateToBlock, setDateToBlock] = useState('');
+  const [endDateToBlock, setEndDateToBlock] = useState('');
   const daysRef = useRef(null);
 
   const toggleHour = (hour) => {
@@ -1099,13 +1125,35 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
     onUpdateSetting('schedule', { ...schedule, [selectedDay]: newHours });
   };
 
-  // חסימת יום שלם
+  // חסימת יום שלם או טווח ימים
   const handleBlockFullDate = () => {
     if (!dateToBlock) return;
-    if (!(blockedDates || []).includes(dateToBlock)) {
-      onUpdateSetting('blockedDates', [...(blockedDates || []), dateToBlock]);
+
+    const pad = n => n.toString().padStart(2, '0');
+    const formatDateStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const newBlocked = [...(blockedDates || [])];
+    let start = new Date(dateToBlock);
+    let end = endDateToBlock ? new Date(endDateToBlock) : new Date(dateToBlock);
+
+    if (end < start) {
+      let temp = start;
+      start = end;
+      end = temp;
     }
+
+    let current = new Date(start);
+    while (current <= end) {
+      const dateStr = formatDateStr(current);
+      if (!newBlocked.includes(dateStr)) {
+        newBlocked.push(dateStr);
+      }
+      current.setDate(current.getDate() + 1);
+    }
+
+    onUpdateSetting('blockedDates', newBlocked);
     setDateToBlock('');
+    setEndDateToBlock('');
   };
 
   // חסימת שעה ספציפית בתאריך ספציפי
@@ -1144,32 +1192,43 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
       {/* אזור חסימת תאריכים ושעות */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CalendarOff className="text-red-500" size={18}/> חסימת ימים ושעות ספציפיות</h3>
-        <p className="text-xs text-gray-500 mb-4">בחרי תאריך שבו העסק סגור (לחסימת יום שלם), או לחצי על שעות מסוימות כדי לחסום אותן באופן נקודתי.</p>
+        <p className="text-xs text-gray-500 mb-4">בחרי טווח תאריכים לחופשה (או תאריך יחיד), או לחצי על שעות מסוימות כדי לחסום אותן נקודתית.</p>
         
-        <input type="date" value={dateToBlock} onChange={e => setDateToBlock(e.target.value)} className="w-full p-2 border rounded-lg text-sm outline-none mb-4 focus:border-red-400" />
+        <div className="flex gap-2 mb-4">
+          <div className="flex-1">
+            <label className="text-[10px] font-bold text-gray-500 mb-1 block">מתאריך:</label>
+            <input type="date" value={dateToBlock} onChange={e => setDateToBlock(e.target.value)} className="w-full p-2 border rounded-lg text-sm outline-none focus:border-red-400" />
+          </div>
+          <div className="flex-1">
+            <label className="text-[10px] font-bold text-gray-500 mb-1 block">עד תאריך (אופציונלי):</label>
+            <input type="date" value={endDateToBlock} onChange={e => setEndDateToBlock(e.target.value)} min={dateToBlock} className="w-full p-2 border rounded-lg text-sm outline-none focus:border-red-400" />
+          </div>
+        </div>
         
         {dateToBlock && (
           <div className="space-y-4 animate-fade-in border-t border-gray-100 pt-4">
             <button onClick={handleBlockFullDate} className="w-full bg-red-500 text-white px-4 py-3 rounded-xl text-sm font-bold hover:bg-red-600 shadow-sm transition-colors">
-              חסמי את כל יום זה
+              {endDateToBlock && endDateToBlock !== dateToBlock ? 'חסמי את כל התאריכים בטווח' : 'חסמי את כל יום זה'}
             </button>
 
-            <div>
-              <h4 className="text-sm font-bold text-gray-700 mb-2">או חסמי רק שעות ספציפיות ביום זה:</h4>
-              <div className="grid grid-cols-3 gap-2">
-                {(schedule[new Date(dateToBlock).getDay()] || []).map(hour => {
-                  const isBlocked = blockedTimeSlots?.[dateToBlock]?.includes(hour);
-                  return (
-                    <button key={hour} onClick={() => toggleSpecificHour(dateToBlock, hour)} className={`py-2 rounded-lg text-sm font-bold border-2 transition-colors ${isBlocked ? 'bg-red-50 border-red-500 text-red-700 shadow-inner' : 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100'}`}>
-                      {hour}
-                    </button>
-                  );
-                })}
+            {(!endDateToBlock || endDateToBlock === dateToBlock) && (
+              <div>
+                <h4 className="text-sm font-bold text-gray-700 mb-2">או חסמי רק שעות ספציפיות ביום זה:</h4>
+                <div className="grid grid-cols-3 gap-2">
+                  {(schedule[new Date(dateToBlock).getDay()] || []).map(hour => {
+                    const isBlocked = blockedTimeSlots?.[dateToBlock]?.includes(hour);
+                    return (
+                      <button key={hour} onClick={() => toggleSpecificHour(dateToBlock, hour)} className={`py-2 rounded-lg text-sm font-bold border-2 transition-colors ${isBlocked ? 'bg-red-50 border-red-500 text-red-700 shadow-inner' : 'bg-gray-50 border-transparent text-gray-600 hover:bg-gray-100'}`}>
+                        {hour}
+                      </button>
+                    );
+                  })}
+                </div>
+                {(schedule[new Date(dateToBlock).getDay()] || []).length === 0 && (
+                  <p className="text-xs text-gray-500 text-center mt-2">העסק לא עובד ביום זה לפי ההגדרות השבועיות.</p>
+                )}
               </div>
-              {(schedule[new Date(dateToBlock).getDay()] || []).length === 0 && (
-                <p className="text-xs text-gray-500 text-center">העסק לא עובד ביום זה לפי ההגדרות השבועיות.</p>
-              )}
-            </div>
+            )}
           </div>
         )}
 
@@ -1179,7 +1238,7 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
             <h4 className="text-xs font-bold text-gray-600 mb-2">חסימות פעילות במערכת:</h4>
             
             {/* ימים שלמים חסומים */}
-            {(blockedDates || []).sort().map(d => (
+            {[...(blockedDates || [])].sort().map(d => (
               <div key={`full-${d}`} className="flex justify-between items-center p-2 bg-red-50 rounded-lg text-sm border border-red-100">
                 <span className="font-bold text-red-700">{d.split('-').reverse().join('/')} - חסום יום שלם</span>
                 <button onClick={() => handleUnblockDate(d)} className="text-red-500 hover:text-red-700 text-xs font-bold underline">שחרר חסימה</button>
@@ -1204,7 +1263,6 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
       <h3 className="font-bold text-gray-800 mb-3 px-1">שעות עבודה קבועות לפי יום:</h3>
       
       <div className="flex items-center gap-1 mb-2">
-        {/* חצים מתוקנים לעברית ימינה = אחורה, שמאלה = קדימה */}
         <button onClick={() => daysRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronRight size={16}/></button>
         
         <div ref={daysRef} className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar scroll-smooth flex-1" dir="rtl">
