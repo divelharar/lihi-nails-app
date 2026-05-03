@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Heart, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle, AlertCircle, Bell, BarChart3, Megaphone, Copy, Check } from 'lucide-react';
+import { Calendar, Clock, Heart, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle, AlertCircle, Bell, BarChart3, Megaphone, Copy, Check, TrendingUp } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // --- החיבור שלך ל-Firebase ---
 const firebaseConfig = {
@@ -88,13 +88,12 @@ function LihiNailsApp() {
   const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
   const [logoUrl, setLogoUrl] = useState('https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop');
   const [isLoading, setIsLoading] = useState(true);
-  const [authError, setAuthError] = useState(false);
 
   useEffect(() => {
     if (!auth) { setIsLoading(false); return; }
     const initAuth = async () => {
       try { await signInAnonymously(auth); } 
-      catch (err) { if (err.code === 'auth/configuration-not-found') { setAuthError(true); setUser({ uid: 'guest-user' }); } }
+      catch (err) { console.error(err); }
     };
     initAuth();
     const unsub = onAuthStateChanged(auth, u => {
@@ -142,6 +141,18 @@ function LihiNailsApp() {
     try { await setDoc(doc(db, 'settings', 'main'), { [field]: value }, { merge: true }); } catch(e) { console.error(e); }
   };
 
+  const handleAdminLogin = () => {
+    if (pin === '1504') {
+      setIsAdminAuthenticated(true);
+      setView('admin');
+      setPin('');
+      setPinError(false);
+    } else {
+      setPinError(true);
+      setPin('');
+    }
+  };
+
   if (isLoading && !user) {
     return (
       <div className="min-h-screen bg-rose-50 flex flex-col items-center justify-center font-sans" dir="rtl">
@@ -175,15 +186,6 @@ function LihiNailsApp() {
             </button>
           </div>
         </header>
-
-        {authError && isAdminAuthenticated && (
-          <div className="max-w-md mx-auto mt-4 px-4">
-             <div className="bg-amber-100 border border-amber-300 p-3 rounded-xl flex gap-3 text-amber-800 text-xs shadow-md">
-                <AlertCircle size={20} className="shrink-0" />
-                <p><strong>הודעת מערכת:</strong> התחברות Anonymous לא מופעלת. הנתונים לא נשמרים בענן.</p>
-             </div>
-          </div>
-        )}
 
         <main className="max-w-md mx-auto min-h-[calc(100vh-80px)] bg-white/95 backdrop-blur-md shadow-2xl sm:rounded-b-3xl overflow-hidden relative border-x border-b border-white/50">
           {view === 'customer' && <CustomerView schedule={schedule} appointments={appointments} onBook={handleAddAppointment} logoUrl={logoUrl} />}
@@ -373,7 +375,7 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
           <form onSubmit={submitBooking} className="space-y-5 flex-1 pb-4 mt-4">
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">שם מלא <span className="text-red-500">*</span></label>
-              <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl focus:border-pink-400 outline-none" placeholder="איך קוראים לך מהממת?" />
+              <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl focus:border-pink-400 outline-none text-right" placeholder="איך קוראים לך מהממת?" dir="rtl" />
             </div>
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">טלפון <span className="text-red-500">*</span></label>
@@ -381,7 +383,7 @@ function CustomerView({ schedule, appointments, onBook, logoUrl }) {
             </div>
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">הערות (לא חובה)</label>
-              <textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl resize-none h-24 focus:border-pink-400 outline-none" placeholder="נשברה ציפורן? בקשה מיוחדת?" />
+              <textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl resize-none h-24 focus:border-pink-400 outline-none text-right" placeholder="נשברה ציפורן? בקשה מיוחדת?" dir="rtl" />
             </div>
             <button type="submit" className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg mt-4 shadow-lg hover:bg-pink-700">אשרי את התור! ✨</button>
           </form>
@@ -407,7 +409,6 @@ function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdate
   const [activeTab, setActiveTab] = useState('appointments');
   const [lastCheckedNotes, setLastCheckedNotes] = useState(() => parseInt(localStorage.getItem('lihi_last_notif')) || Date.now());
 
-  // מערכת התראות לתורים חדשים
   const newApptsCount = appointments.filter(a => a.createdAt && a.createdAt > lastCheckedNotes).length;
 
   const handleTabClick = (tab) => {
@@ -421,7 +422,6 @@ function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdate
   return (
     <div className="flex flex-col h-full bg-gray-50">
       <div className="bg-gray-900 text-white p-5 rounded-b-3xl shadow-lg flex justify-between items-center">
-        <h2 className="text-2xl font-bold">לוח בקרה 👑</h2>
         <button onClick={() => handleTabClick('appointments')} className="relative p-2 bg-gray-800 rounded-full hover:bg-gray-700 transition-colors">
           <Bell size={20} className="text-pink-400" />
           {newApptsCount > 0 && (
@@ -430,10 +430,10 @@ function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdate
             </span>
           )}
         </button>
+        <h2 className="text-2xl font-bold mb-1">לוח בקרה 👑</h2>
       </div>
 
-      {/* תפריט ניווט תחתון למנהלת */}
-      <div className="flex px-4 mt-6 gap-2 overflow-x-auto hide-scrollbar pb-2">
+      <div className="flex px-4 mt-6 gap-2 overflow-x-auto hide-scrollbar pb-2" dir="rtl">
         <button onClick={() => handleTabClick('appointments')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all ${activeTab === 'appointments' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
           <Calendar size={16} /> תורים
         </button>
@@ -448,7 +448,7 @@ function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdate
         </button>
       </div>
 
-      <div className="p-4 flex-1 overflow-y-auto">
+      <div className="p-4 flex-1 overflow-y-auto" dir="rtl">
         {activeTab === 'appointments' && <AdminAppointmentsList appointments={appointments} onDeleteAppointment={onDeleteAppointment} onUpdateAppointment={onUpdateAppointment} whatsappTemplate={whatsappTemplate} />}
         {activeTab === 'analytics' && <AdminAnalytics appointments={appointments} />}
         {activeTab === 'broadcast' && <AdminBroadcast appointments={appointments} />}
@@ -458,15 +458,12 @@ function AdminView({ schedule, appointments, logoUrl, whatsappTemplate, onUpdate
   );
 }
 
-// ================== עמוד תורים מאורגן ==================
 function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppointment, whatsappTemplate }) {
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState(null);
 
-  // חילוץ תאריכים ייחודיים ומיון מהקרוב לרחוק
   const sortedAppointments = [...appointments].sort((a, b) => new Date(`${a.date}T${a.time}`) - new Date(`${b.date}T${b.time}`));
   
-  // קיבוץ תורים לפי תאריכים
   const groupedAppts = sortedAppointments.reduce((groups, appt) => {
     const dateStr = appt.date || 'ללא תאריך';
     if (!groups[dateStr]) groups[dateStr] = [];
@@ -513,12 +510,12 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
         return (
           <div key={dateStr}>
             <h3 className="font-bold text-gray-800 mb-3 flex items-center gap-2 bg-pink-100 px-4 py-2 rounded-xl text-pink-800 shadow-sm border border-pink-200">
-              <CalendarIcon size={18} /> יום {dayName}, {formattedDate}
+              <Calendar size={18} /> יום {dayName}, {formattedDate}
             </h3>
             
             <div className="space-y-3">
               {groupedAppts[dateStr].map(appt => {
-                const isNew = appt.createdAt && (Date.now() - appt.createdAt < 24 * 60 * 60 * 1000); // תור שנקבע ב24 שעות האחרונות
+                const isNew = appt.createdAt && (Date.now() - appt.createdAt < 24 * 60 * 60 * 1000); 
                 
                 if (editingId === appt.id) {
                   return (
@@ -542,20 +539,20 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
                 return (
                   <div key={appt.id} className={`bg-white p-4 rounded-2xl shadow-sm border ${isNew ? 'border-pink-400 bg-pink-50/30' : 'border-gray-100'} flex justify-between items-start relative`}>
                     <div className="absolute right-0 top-0 bottom-0 w-1.5 bg-pink-500 rounded-r-2xl"></div>
-                    <div className="pr-2">
-                      <div className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                    <div className="pr-2 text-right w-full">
+                      <div className="font-bold text-gray-900 text-lg flex items-center gap-2 flex-row-reverse justify-end">
                         {appt.time} - {appt.name}
                         {isNew && <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-normal animate-pulse">חדש!</span>}
                       </div>
                       <div className="text-xs mt-1 font-semibold text-pink-600 bg-pink-100 inline-block px-2 py-1 rounded">
                         {appt.services && appt.services.map(s => s.label.split('-')[0].trim()).join(' + ')}
                       </div>
-                      <div className="mt-2 text-sm text-gray-600 flex items-center gap-2">
+                      <div className="mt-2 text-sm text-gray-600 flex items-center gap-2 flex-row-reverse justify-end">
                         📞 <a href={`tel:${appt.phone}`} className="hover:underline">{appt.phone}</a>
                       </div>
                       {appt.notes && <div className="mt-2 text-xs text-gray-600 bg-orange-50 border border-orange-100 p-2 rounded-lg"><span className="font-bold">הערות:</span> {appt.notes}</div>}
                     </div>
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-2 pl-2">
                       <button onClick={() => sendWhatsAppConfirmation(appt)} className="w-8 h-8 rounded-full bg-[#25D366]/10 text-[#25D366] flex items-center justify-center"><MessageCircle size={16} /></button>
                       <button onClick={() => handleEditClick(appt)} className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center"><Edit2 size={16} /></button>
                       <button onClick={() => { if(window.confirm('למחוק תור זה?')) onDeleteAppointment(appt.id); }} className="w-8 h-8 rounded-full bg-red-50 text-red-500 flex items-center justify-center"><X size={16} /></button>
@@ -571,16 +568,13 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
   );
 }
 
-// ================== עמוד הכנסות וסטטיסטיקה ==================
 function AdminAnalytics({ appointments }) {
-  // פונקציית עזר לחישוב מחיר של תור בודד
   const getApptPrice = (appt) => {
     let total = 0;
     const items = [...(appt.services || []), ...(appt.extras || [])];
     items.forEach(item => {
       if (item.price) { total += item.price; } 
       else {
-        // גיבוי: חילוץ מספר מהטקסט במידה ואין שדה מחיר (לתורים ישנים)
         const match = item.label ? item.label.match(/(\d+)\s*₪/) : null;
         if (match) total += parseInt(match[1]);
       }
@@ -588,13 +582,12 @@ function AdminAnalytics({ appointments }) {
     return total;
   };
 
-  // הכנת נתונים לפי חודשים
   const monthlyData = {};
   let totalYearlyIncome = 0;
   
   appointments.forEach(appt => {
     if (!appt.date) return;
-    const [year, month] = appt.date.split('-'); // "2026-05"
+    const [year, month] = appt.date.split('-'); 
     const monthKey = `${month}/${year.substring(2)}`;
     
     if (!monthlyData[monthKey]) {
@@ -607,7 +600,6 @@ function AdminAnalytics({ appointments }) {
     totalYearlyIncome += price;
   });
 
-  // הפיכה למערך ומיון כרונולוגי
   const chartData = Object.values(monthlyData).sort((a, b) => {
     const [m1, y1] = a.name.split('/');
     const [m2, y2] = b.name.split('/');
@@ -615,11 +607,11 @@ function AdminAnalytics({ appointments }) {
   });
 
   return (
-    <div className="pb-10 animate-fade-in">
+    <div className="pb-10 animate-fade-in text-right">
       <div className="bg-gradient-to-br from-pink-600 to-pink-500 rounded-2xl p-6 text-white shadow-lg mb-6">
         <h3 className="text-sm font-medium opacity-90 mb-1">הכנסות מכלל התורים שנקבעו</h3>
-        <div className="text-4xl font-black mb-2">₪{totalYearlyIncome.toLocaleString()}</div>
-        <div className="text-sm flex items-center gap-1 opacity-90"><TrendingUp size={16}/> סטטיסטיקה היסטורית ועתידית</div>
+        <div className="text-4xl font-black mb-2" dir="ltr">₪{totalYearlyIncome.toLocaleString()}</div>
+        <div className="text-sm flex items-center gap-1 opacity-90 justify-end"><TrendingUp size={16}/> סטטיסטיקה היסטורית ועתידית</div>
       </div>
 
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
@@ -645,7 +637,7 @@ function AdminAnalytics({ appointments }) {
         {chartData.map(data => (
           <div key={data.name} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 text-center">
             <div className="text-xs text-gray-500 font-bold mb-1">חודש {data.name}</div>
-            <div className="text-lg font-black text-pink-600">₪{data.income.toLocaleString()}</div>
+            <div className="text-lg font-black text-pink-600" dir="ltr">₪{data.income.toLocaleString()}</div>
             <div className="text-[10px] text-gray-400 mt-1">{data.count} לקוחות קבעו</div>
           </div>
         ))}
@@ -654,11 +646,9 @@ function AdminAnalytics({ appointments }) {
   );
 }
 
-// ================== עמוד הודעות תפוצה ==================
 function AdminBroadcast({ appointments }) {
   const [copied, setCopied] = useState(false);
 
-  // חילוץ מספרי טלפון ייחודיים בלבד
   const uniqueNumbers = [...new Set(appointments
     .map(a => a.phone ? a.phone.replace(/\D/g, '') : '')
     .filter(p => p.length >= 9)
@@ -672,11 +662,11 @@ function AdminBroadcast({ appointments }) {
   };
 
   return (
-    <div className="pb-10 animate-fade-in">
+    <div className="pb-10 animate-fade-in text-right">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-6 text-center">
         <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4"><Megaphone size={32} /></div>
         <h2 className="text-xl font-bold text-gray-800 mb-2">שליחת הודעת תפוצה בווצאפ</h2>
-        <p className="text-sm text-gray-500 leading-relaxed mb-6">
+        <p className="text-sm text-gray-500 leading-relaxed mb-6" dir="rtl">
           ווצאפ לא מאפשרת לשלוח הודעות להמון אנשים בבת אחת כדי למנוע ספאם. 
           כדי לשלוח הודעה לכל הלקוחות שלך, עליך לפתוח <strong>"רשימת תפוצה" (Broadcast)</strong> באפליקציית הווצאפ שלך, ולהדביק לשם את כל המספרים.
         </p>
@@ -694,11 +684,11 @@ function AdminBroadcast({ appointments }) {
         </button>
       </div>
 
-      <div className="bg-yellow-50 p-4 rounded-2xl border border-yellow-200 text-yellow-800 text-sm">
-        <strong>איך עושים את זה?</strong>
-        <ol className="list-decimal list-inside mt-2 space-y-1">
+      <div className="bg-yellow-50 p-4 rounded-2xl border border-yellow-200 text-yellow-800 text-sm text-right">
+        <strong className="block mb-2">איך עושים את זה?</strong>
+        <ol className="list-decimal list-inside space-y-1">
           <li>לחצי על הכפתור הכחול למעלה להעתקת המספרים.</li>
-          <li>כנסי לווצאפ, לחצי על 3 הנקודות ובחרי "רשימת תפוצה חדשה" (New broadcast).</li>
+          <li>כנסי לווצאפ, לחצי על 3 הנקודות ובחרי "רשימת תפוצה חדשה".</li>
           <li>הדביקי את המספרים בתיבת החיפוש והוסיפי אותם.</li>
           <li>שלחי את ההודעה הרצויה לכולן בבת אחת! 💬</li>
         </ol>
@@ -707,7 +697,6 @@ function AdminBroadcast({ appointments }) {
   );
 }
 
-// ================== עמוד הגדרות ==================
 function AdminScheduleSettings({ schedule, logoUrl, whatsappTemplate, onUpdateSetting }) {
   const [selectedDay, setSelectedDay] = useState(0);
   const toggleHour = (hour) => {
