@@ -711,7 +711,7 @@ function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras,
 
       <div className="flex items-center px-2 mt-6 gap-1 w-full">
         {/* חצים מתוקנים לעברית */}
-        <button onClick={() => tabsRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
+        <button onClick={() => tabsRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
           <ChevronRight size={18} />
         </button>
         
@@ -734,7 +734,7 @@ function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras,
         </div>
 
         {/* חצים מתוקנים לעברית */}
-        <button onClick={() => tabsRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
+        <button onClick={() => tabsRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
           <ChevronLeft size={18} />
         </button>
       </div>
@@ -1205,7 +1205,7 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
       
       <div className="flex items-center gap-1 mb-2">
         {/* חצים מתוקנים לעברית ימינה = אחורה, שמאלה = קדימה */}
-        <button onClick={() => daysRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronRight size={16}/></button>
+        <button onClick={() => daysRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronRight size={16}/></button>
         
         <div ref={daysRef} className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar scroll-smooth flex-1" dir="rtl">
           {DAYS_OF_WEEK.map((dayName, index) => index !== 6 && ( 
@@ -1213,7 +1213,7 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
           ))}
         </div>
 
-        <button onClick={() => daysRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronLeft size={16}/></button>
+        <button onClick={() => daysRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronLeft size={16}/></button>
       </div>
 
       <div className="mt-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
