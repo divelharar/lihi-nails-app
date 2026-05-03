@@ -5,11 +5,47 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// --- מנגנון חכם לזיהוי השרת (Vercel או סביבת פיתוח) ---
+const isVercel = typeof __firebase_config === 'undefined';
+let firebaseConfig;
+
+if (!isVercel) {
+  try { firebaseConfig = JSON.parse(__firebase_config); } catch (e) {}
+}
+
+if (!firebaseConfig) {
+  // המפתחות המקוריים שלך ב-Firebase
+  firebaseConfig = {
+    apiKey: "AIzaSyDlXeIC2YiBFk2uq_b81AQljiT-Bmf-QgI",
+    authDomain: "lihi-nails.firebaseapp.com",
+    projectId: "lihi-nails",
+    storageBucket: "lihi-nails.firebasestorage.app",
+    messagingSenderId: "504139844570",
+    appId: "1:504139844570:web:79e7779b643c7acf464ee3"
+  };
+}
+
+let app, auth, db;
+try {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+} catch (e) {
+  console.error("Firebase Init Error:", e);
+}
+
+// פונקציות עזר לניתוב חכם של מסד הנתונים
+const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+const getApptsCollection = () => {
+  return isVercel ? collection(db, 'appointments') : collection(db, 'artifacts', currentAppId, 'public', 'data', 'appointments');
+};
+const getSettingsDoc = () => {
+  return isVercel ? doc(db, 'settings', 'main') : doc(db, 'artifacts', currentAppId, 'public', 'data', 'settings', 'main');
+};
+const getApptDoc = (id) => {
+  return isVercel ? doc(db, 'appointments', id) : doc(db, 'artifacts', currentAppId, 'public', 'data', 'appointments', id);
+};
 
 // --- הגדרות ברירת מחדל לזמינות ---
 const DEFAULT_SCHEDULE = {
@@ -70,7 +106,7 @@ export default function App() {
   const [services, setServices] = useState(DEFAULT_SERVICES);
   const [extras, setExtras] = useState(DEFAULT_EXTRAS);
   const [blockedDates, setBlockedDates] = useState([]);
-  const [blockedTimeSlots, setBlockedTimeSlots] = useState({}); // סטייט חדש לשעות חסומות ספציפיות
+  const [blockedTimeSlots, setBlockedTimeSlots] = useState({});
   const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
   const [logoUrl, setLogoUrl] = useState(DEFAULT_LOGO_URL);
 
@@ -94,14 +130,12 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    const apptQuery = collection(db, 'artifacts', appId, 'public', 'data', 'appointments');
-    const unsubAppts = onSnapshot(apptQuery, (snapshot) => {
+    const unsubAppts = onSnapshot(getApptsCollection(), (snapshot) => {
       const loadedAppts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAppointments(loadedAppts);
     }, (err) => console.error(err));
 
-    const settingsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main');
-    const unsubSettings = onSnapshot(settingsDocRef, (docSnap) => {
+    const unsubSettings = onSnapshot(getSettingsDoc(), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.schedule) setSchedule(data.schedule);
@@ -112,7 +146,7 @@ export default function App() {
         if (data.blockedDates) setBlockedDates(data.blockedDates);
         if (data.blockedTimeSlots) setBlockedTimeSlots(data.blockedTimeSlots);
       } else {
-        setDoc(settingsDocRef, {
+        setDoc(getSettingsDoc(), {
           schedule: DEFAULT_SCHEDULE,
           services: DEFAULT_SERVICES,
           extras: DEFAULT_EXTRAS,
@@ -134,29 +168,28 @@ export default function App() {
   const handleAddAppointment = async (newAppt) => {
     if (!user) return;
     try {
-      const collRef = collection(db, 'artifacts', appId, 'public', 'data', 'appointments');
-      await addDoc(collRef, { ...newAppt, createdAt: Date.now() });
+      await addDoc(getApptsCollection(), { ...newAppt, createdAt: Date.now() });
     } catch(e) { console.error("Error adding appt", e); }
   };
 
   const handleDeleteAppointment = async (id) => {
     if (!user) return;
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', id));
+      await deleteDoc(getApptDoc(id));
     } catch(e) { console.error("Error deleting appt", e); }
   };
 
   const handleUpdateAppointment = async (id, updatedData) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'appointments', id), updatedData);
+      await updateDoc(getApptDoc(id), updatedData);
     } catch(e) { console.error("Error updating appt", e); }
   };
 
   const handleUpdateSetting = async (field, value) => {
     if (!user) return;
     try {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'main'), {
+      await setDoc(getSettingsDoc(), {
         [field]: value
       }, { merge: true });
     } catch(e) { console.error("Error updating setting", e); }
@@ -185,10 +218,6 @@ export default function App() {
     );
   }
 
-  // הגנה על הלוגו מפני קישורים שבורים
-  const safeLogoUrl = logoUrl && logoUrl.trim() !== '' ? logoUrl : DEFAULT_LOGO_URL;
-  const handleImageError = (e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; };
-
   return (
     <div className="min-h-screen font-sans text-right bg-cover bg-center bg-fixed relative" dir="rtl" style={{ backgroundImage: "url('https://images.unsplash.com/photo-1522337660859-02fbefca4702?q=80&w=2069&auto=format&fit=crop')" }}>
       <div className="absolute inset-0 bg-rose-50/85 backdrop-blur-sm"></div>
@@ -197,7 +226,7 @@ export default function App() {
         <header className="bg-white/90 backdrop-blur-md shadow-sm sticky top-0 z-20">
           <div className="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <img src={safeLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-12 h-12 rounded-full object-cover border-2 border-pink-200 shadow-sm bg-white" />
+              <img src={logoUrl || DEFAULT_LOGO_URL} onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; }} alt="לוגו Lihi Nails" className="w-12 h-12 rounded-full object-cover border-2 border-pink-200 shadow-sm bg-white" />
               <div>
                 <h1 className="text-xl font-bold text-gray-900 leading-tight">Lihi Nails 💅✨</h1>
                 <p className="text-xs text-pink-600 font-bold">האומנות שלי, הציפורניים שלך 💎</p>
@@ -233,13 +262,13 @@ export default function App() {
               extras={extras || []}
               appointments={appointments} 
               onBook={handleAddAppointment} 
-              logoUrl={safeLogoUrl}
+              logoUrl={logoUrl}
             />
           )}
           
           {view === 'auth' && (
             <div className="p-8 flex flex-col items-center justify-center h-full min-h-[60vh] text-center fade-in bg-white/90">
-              <img src={safeLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-24 h-24 rounded-full border-4 border-pink-100 shadow-md mb-6 object-cover bg-white" />
+              <img src={logoUrl || DEFAULT_LOGO_URL} onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; }} alt="לוגו Lihi Nails" className="w-24 h-24 rounded-full border-4 border-pink-100 shadow-md mb-6 object-cover bg-white" />
               <h2 className="text-2xl font-bold text-gray-800 mb-2">כניסת מנהלת 👑</h2>
               <p className="text-gray-500 mb-8 text-sm">היי ליהיא! הקלידי את קוד הגישה שלך כדי לנהל את התורים:</p>
               
@@ -285,7 +314,7 @@ export default function App() {
               services={services || []}
               extras={extras || []}
               appointments={appointments} 
-              logoUrl={safeLogoUrl}
+              logoUrl={logoUrl}
               whatsappTemplate={whatsappTemplate}
               onUpdateSetting={handleUpdateSetting}
               onDeleteAppointment={handleDeleteAppointment}
@@ -335,7 +364,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
   const [currentMonth, setCurrentMonth] = useState(new Date());
   
   const [formData, setFormData] = useState({ name: '', phone: '', notes: '' });
-  const dateContainerRef = useRef(null);
 
   const toggleService = (s) => setSelectedServices(prev => prev.find(x => x.id === s.id) ? prev.filter(x => x.id !== s.id) : [...prev, s]);
   const toggleExtra = (e) => setSelectedExtras(prev => prev.find(x => x.id === e.id) ? prev.filter(x => x.id !== e.id) : [...prev, e]);
@@ -390,7 +418,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
     setStep(4);
   };
 
-  // פונקציות ליצירת הלוח שנה
   const pad = n => n.toString().padStart(2, '0');
   const formatDateStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   
@@ -421,9 +448,10 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
     return (
       <div className="bg-white rounded-3xl p-4 shadow-sm border border-gray-100 mb-6">
         <div className="flex justify-between items-center mb-4 px-2">
-          <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-colors"><ChevronRight size={20}/></button>
+          {/* חצים מתוקנים לעברית: ימינה = אחורה, שמאלה = קדימה */}
+          <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-colors"><ChevronRight size={20}/></button>
           <div className="font-bold text-lg text-gray-800">{MONTHS_HE[currentMonth.getMonth()]} {currentMonth.getFullYear()}</div>
-          <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-colors"><ChevronLeft size={20}/></button>
+          <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-colors"><ChevronLeft size={20}/></button>
         </div>
         
         <div className="grid grid-cols-7 gap-y-3 gap-x-1 text-center mb-2">
@@ -448,23 +476,19 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
             let subTextClass = "text-[10px] z-10 leading-none mt-0.5 ";
 
             if (isSelected) {
-              // בחירה
               cellClass += "bg-pink-600 border-2 border-pink-600 shadow-md transform scale-105";
               textClass += "text-white";
               subText = "נבחר";
               subTextClass += "text-pink-100 font-medium";
             } else if (isPast || isClosedDay) {
-              // ימים שעברו או סגורים קבוע
               cellClass += "opacity-40 cursor-not-allowed border border-transparent";
               textClass += "text-gray-400 font-normal";
             } else if (isBlocked || isFull) {
-              // תפוס או חסום על ידי המנהלת
               cellClass += "bg-gray-700 border-2 border-gray-700";
               textClass += "text-white";
               subText = isBlocked ? "סגור" : "תפוס";
               subTextClass += "text-gray-300 font-medium";
             } else {
-              // פנוי להזמנה
               cellClass += "bg-pink-50 border-2 border-pink-400 hover:bg-pink-100 cursor-pointer shadow-sm";
               textClass += "text-pink-800";
               subText = "פנוי";
@@ -503,6 +527,9 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
       setSelectedTime('');
   };
 
+  const safeLogoUrl = logoUrl && logoUrl.trim() !== '' ? logoUrl : DEFAULT_LOGO_URL;
+  const handleImageError = (e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; };
+
   return (
     <div className="flex flex-col h-full bg-transparent pb-10">
       {step === 1 && (
@@ -510,7 +537,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <div className="absolute top-[-50px] right-[-50px] w-32 h-32 bg-pink-400 rounded-full opacity-50 blur-2xl"></div>
           <div className="absolute bottom-[-30px] left-[-20px] w-24 h-24 bg-pink-400 rounded-full opacity-50 blur-xl"></div>
           <div className="relative z-10 text-center flex flex-col items-center">
-            <img src={logoUrl} onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; }} alt="Lihi Nails" className="w-28 h-28 rounded-full border-4 border-white/40 shadow-xl mb-4 object-cover bg-white" />
+            <img src={safeLogoUrl} onError={handleImageError} alt="Lihi Nails" className="w-28 h-28 rounded-full border-4 border-white/40 shadow-xl mb-4 object-cover bg-white" />
             <h2 className="text-2xl font-bold mb-2 drop-shadow-md">ליהיא ניילס - מומחית ללק ג'ל 👑💅</h2>
             <p className="text-pink-50 text-sm leading-relaxed max-w-[280px] mx-auto font-medium text-center">שנים של ניסיון בתחום, הקפדה על הפרטים הקטנים ביותר ומאות לקוחות שכבר התמכרו. בואי להתפנק! 💖✨</p>
           </div>
@@ -574,7 +601,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           
           <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-pink-500" size={20} /> מתי נוח לך?</h3>
           
-          {/* הלוח שנה החדש והמעודכן */}
           {renderCalendar()}
 
           {selectedDate && (
@@ -683,9 +709,9 @@ function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras,
         <h2 className="text-2xl font-bold mb-1">לוח בקרה 👑</h2>
       </div>
 
-      {/* Admin Tabs - תוקן עם חצים מתאימים לעברית */}
       <div className="flex items-center px-2 mt-6 gap-1 w-full">
-        <button onClick={() => tabsRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
+        {/* חצים מתוקנים לעברית */}
+        <button onClick={() => tabsRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
           <ChevronRight size={18} />
         </button>
         
@@ -707,7 +733,8 @@ function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras,
           </button>
         </div>
 
-        <button onClick={() => tabsRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
+        {/* חצים מתוקנים לעברית */}
+        <button onClick={() => tabsRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
           <ChevronLeft size={18} />
         </button>
       </div>
@@ -1177,7 +1204,8 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
       <h3 className="font-bold text-gray-800 mb-3 px-1">שעות עבודה קבועות לפי יום:</h3>
       
       <div className="flex items-center gap-1 mb-2">
-        <button onClick={() => daysRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronRight size={16}/></button>
+        {/* חצים מתוקנים לעברית ימינה = אחורה, שמאלה = קדימה */}
+        <button onClick={() => daysRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronRight size={16}/></button>
         
         <div ref={daysRef} className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar scroll-smooth flex-1" dir="rtl">
           {DAYS_OF_WEEK.map((dayName, index) => index !== 6 && ( 
@@ -1185,7 +1213,7 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
           ))}
         </div>
 
-        <button onClick={() => daysRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronLeft size={16}/></button>
+        <button onClick={() => daysRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-1.5 bg-white border border-gray-200 rounded-full hover:bg-gray-50 flex-shrink-0 text-gray-600 shadow-sm z-10"><ChevronLeft size={16}/></button>
       </div>
 
       <div className="mt-4 bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
