@@ -115,6 +115,7 @@ function LihiNailsApp() {
   const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
   const [logoUrl, setLogoUrl] = useState(DEFAULT_LOGO_URL);
 
+  // הליך התחברות טהור - רק מול ה-Firebase של ליהיא
   useEffect(() => {
     if (!auth) {
       setLoadingData(false);
@@ -141,6 +142,7 @@ function LihiNailsApp() {
     return () => unsubscribe();
   }, [user]);
 
+  // משיכת הנתונים ישירות מהתיקיות האמיתיות (appointments, settings)
   useEffect(() => {
     if (!user || !db) return;
 
@@ -551,9 +553,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
       setSelectedTime('');
   };
 
-  const safeLogoUrl = logoUrl && logoUrl.trim() !== '' ? logoUrl : DEFAULT_LOGO_URL;
-  const handleImageError = (e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; };
-
   return (
     <div className="flex flex-col h-full bg-transparent pb-10">
       {step === 1 && (
@@ -561,7 +560,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <div className="absolute top-[-50px] right-[-50px] w-32 h-32 bg-pink-400 rounded-full opacity-50 blur-2xl"></div>
           <div className="absolute bottom-[-30px] left-[-20px] w-24 h-24 bg-pink-400 rounded-full opacity-50 blur-xl"></div>
           <div className="relative z-10 text-center flex flex-col items-center">
-            <img src={safeLogoUrl} onError={handleImageError} alt="Lihi Nails" className="w-28 h-28 rounded-full border-4 border-white/40 shadow-xl mb-4 object-cover bg-white" />
+            <img src={logoUrl} onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; }} alt="Lihi Nails" className="w-28 h-28 rounded-full border-4 border-white/40 shadow-xl mb-4 object-cover bg-white" />
             <h2 className="text-2xl font-bold mb-2 drop-shadow-md">ליהיא ניילס - מומחית ללק ג'ל 👑💅</h2>
             <p className="text-pink-50 text-sm leading-relaxed max-w-[280px] mx-auto font-medium text-center">שנים של ניסיון בתחום, הקפדה על הפרטים הקטנים ביותר ומאות לקוחות שכבר התמכרו. בואי להתפנק! 💖✨</p>
           </div>
@@ -661,7 +660,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <form onSubmit={submitBooking} className="space-y-5 flex-1 pb-4 text-right" dir="rtl">
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">שם מלא <span className="text-red-500">*</span></label>
-              {/* === התיקון שביקשת נמצא כאן! (הורדתי את ה"מהממת") === */}
               <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-pink-400 outline-none transition-all" placeholder="איך קוראים לך?" dir="rtl" />
             </div>
             <div>
@@ -736,7 +734,7 @@ function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras,
       </div>
 
       <div className="flex items-center px-2 mt-6 gap-1 w-full">
-        {/* חצים מתוקנים לעברית */}
+        {/* חצים מתוקנים לעברית: ימינה זה אחורה, שמאלה זה קדימה */}
         <button onClick={() => tabsRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
           <ChevronRight size={18} />
         </button>
@@ -1125,7 +1123,6 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
     onUpdateSetting('schedule', { ...schedule, [selectedDay]: newHours });
   };
 
-  // חסימת יום שלם או טווח ימים
   const handleBlockFullDate = () => {
     if (!dateToBlock) return;
 
@@ -1156,7 +1153,6 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
     setEndDateToBlock('');
   };
 
-  // חסימת שעה ספציפית בתאריך ספציפי
   const toggleSpecificHour = (dateStr, hour) => {
     const currentSlots = blockedTimeSlots || {};
     const daySlots = currentSlots[dateStr] || [];
@@ -1189,7 +1185,6 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
   return (
     <div className="pb-10 text-right" dir="rtl">
       
-      {/* אזור חסימת תאריכים ושעות */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CalendarOff className="text-red-500" size={18}/> חסימת ימים ושעות ספציפיות</h3>
         <p className="text-xs text-gray-500 mb-4">בחרי טווח תאריכים לחופשה (או תאריך יחיד), או לחצי על שעות מסוימות כדי לחסום אותן נקודתית.</p>
@@ -1232,12 +1227,10 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
           </div>
         )}
 
-        {/* רשימת החסימות הפעילות */}
         {((blockedDates && blockedDates.length > 0) || (blockedTimeSlots && Object.keys(blockedTimeSlots).length > 0)) && (
           <div className="space-y-2 border-t border-gray-100 pt-4 mt-4">
             <h4 className="text-xs font-bold text-gray-600 mb-2">חסימות פעילות במערכת:</h4>
             
-            {/* ימים שלמים חסומים */}
             {[...(blockedDates || [])].sort().map(d => (
               <div key={`full-${d}`} className="flex justify-between items-center p-2 bg-red-50 rounded-lg text-sm border border-red-100">
                 <span className="font-bold text-red-700">{d.split('-').reverse().join('/')} - חסום יום שלם</span>
@@ -1245,7 +1238,6 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
               </div>
             ))}
 
-            {/* שעות ספציפיות חסומות */}
             {Object.entries(blockedTimeSlots || {}).sort(([a], [b]) => a.localeCompare(b)).map(([dStr, hours]) => (
               <div key={`part-${dStr}`} className="flex justify-between items-center p-2 bg-orange-50 rounded-lg text-sm border border-orange-100">
                 <div>
@@ -1259,7 +1251,6 @@ function AdminScheduleSettings({ schedule, blockedDates, blockedTimeSlots, logoU
         )}
       </div>
 
-      {/* זמינות שבועית קבועה */}
       <h3 className="font-bold text-gray-800 mb-3 px-1">שעות עבודה קבועות לפי יום:</h3>
       
       <div className="flex items-center gap-1 mb-2">
