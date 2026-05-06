@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle, AlertCircle, Bell, BarChart3, Megaphone, Copy, Check, TrendingUp, Plus, Trash2, CalendarOff } from 'lucide-react';
+import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle, AlertCircle, Bell, BarChart3, Megaphone, Copy, Check, TrendingUp, Plus, Trash2, CalendarOff, Users, Search, Save } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -26,20 +26,16 @@ try {
 
 // --- הגדרות ברירת מחדל לזמינות ---
 const DEFAULT_SCHEDULE = {
-  0: ['09:00', '10:00', '11:00', '12:00', '13:00', '16:00', '17:00'], // ראשון
-  1: ['17:00', '18:00', '19:00'], // שני
-  2: ['09:00', '10:00', '11:00', '12:00', '13:00'], // שלישי
-  3: ['09:00', '10:00', '11:00', '16:00', '17:00', '18:00'], // רביעי
-  4: ['09:00', '10:00', '11:00', '12:00', '13:00'], // חמישי
-  5: ['09:00', '10:00', '11:00', '12:00'], // שישי
-  6: [] // שבת
+  0: ['09:00', '10:00', '11:00', '12:00', '13:00', '16:00', '17:00'],
+  1: ['17:00', '18:00', '19:00'],
+  2: ['09:00', '10:00', '11:00', '12:00', '13:00'],
+  3: ['09:00', '10:00', '11:00', '16:00', '17:00', '18:00'],
+  4: ['09:00', '10:00', '11:00', '12:00', '13:00'],
+  5: ['09:00', '10:00', '11:00', '12:00'],
+  6: []
 };
 
-const ALL_POSSIBLE_HOURS = [
-  '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', 
-  '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'
-];
-
+const ALL_POSSIBLE_HOURS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'];
 const DAYS_OF_WEEK = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 const MONTHS_HE = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 
@@ -67,7 +63,6 @@ const DEFAULT_WHATSAPP_TEMPLATE = `היי [שם_לקוחה] המהממת! 🌸
 
 מחכה לך לזמן של פינוק! 💖`;
 
-// התיקון העיקרי: מפנה ישירות ללוגו המקומי שלך
 const DEFAULT_LOGO_URL = '/LOGO.jpeg';
 
 class ErrorBoundary extends React.Component {
@@ -108,6 +103,7 @@ function LihiNailsApp() {
   const [loadingData, setLoadingData] = useState(true);
 
   const [appointments, setAppointments] = useState([]);
+  const [customersData, setCustomersData] = useState([]);
   const [schedule, setSchedule] = useState(DEFAULT_SCHEDULE);
   const [services, setServices] = useState(DEFAULT_SERVICES);
   const [extras, setExtras] = useState(DEFAULT_EXTRAS);
@@ -121,39 +117,27 @@ function LihiNailsApp() {
       setLoadingData(false);
       return;
     }
-    
     const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-      } catch (err) {
-        console.error("Auth error:", err);
-      }
+      try { await signInAnonymously(auth); } catch (err) { console.error("Auth error:", err); }
     };
     initAuth();
-    
     const unsubscribe = onAuthStateChanged(auth, (u) => {
-      if (u) {
-        setUser(u);
-      } else {
-        setTimeout(() => { if (!user) setUser({ uid: 'temp' }); }, 2000);
-      }
+      if (u) { setUser(u); } else { setTimeout(() => { if (!user) setUser({ uid: 'temp' }); }, 2000); }
     });
-    
     return () => unsubscribe();
   }, []);
 
   useEffect(() => {
     if (!user || !db) return;
 
-    // משיכת נתונים ישירות מהתיקיות האמיתיות שלך
     const unsubAppts = onSnapshot(collection(db, 'appointments'), (snapshot) => {
-      const loadedAppts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAppointments(loadedAppts);
+      setAppointments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoadingData(false);
-    }, (err) => {
-      console.error(err);
-      setLoadingData(false);
-    });
+    }, (err) => { console.error(err); setLoadingData(false); });
+
+    const unsubCustomers = onSnapshot(collection(db, 'customers'), (snapshot) => {
+      setCustomersData(snapshot.docs.map(doc => ({ phone: doc.id, ...doc.data() })));
+    }, (err) => console.error(err));
 
     const unsubSettings = onSnapshot(doc(db, 'settings', 'main'), (docSnap) => {
       if (docSnap.exists()) {
@@ -167,77 +151,55 @@ function LihiNailsApp() {
         if (data.blockedTimeSlots) setBlockedTimeSlots(data.blockedTimeSlots);
       } else {
         setDoc(doc(db, 'settings', 'main'), {
-          schedule: DEFAULT_SCHEDULE,
-          services: DEFAULT_SERVICES,
-          extras: DEFAULT_EXTRAS,
-          blockedDates: [],
-          blockedTimeSlots: {},
-          logoUrl: DEFAULT_LOGO_URL,
-          whatsappTemplate: DEFAULT_WHATSAPP_TEMPLATE
+          schedule: DEFAULT_SCHEDULE, services: DEFAULT_SERVICES, extras: DEFAULT_EXTRAS,
+          blockedDates: [], blockedTimeSlots: {}, logoUrl: DEFAULT_LOGO_URL, whatsappTemplate: DEFAULT_WHATSAPP_TEMPLATE
         });
       }
     }, (err) => console.error(err));
 
-    return () => {
-      unsubAppts();
-      unsubSettings();
-    };
+    return () => { unsubAppts(); unsubCustomers(); unsubSettings(); };
   }, [user]);
 
   const handleAddAppointment = async (newAppt) => {
     if (!user || !db) return;
-    try {
-      await addDoc(collection(db, 'appointments'), { ...newAppt, createdAt: Date.now() });
-    } catch(e) { console.error("Error adding appt", e); }
+    try { await addDoc(collection(db, 'appointments'), { ...newAppt, createdAt: Date.now() }); } catch(e) { console.error(e); }
   };
 
   const handleDeleteAppointment = async (id) => {
     if (!user || !db) return;
-    try {
-      await deleteDoc(doc(db, 'appointments', id));
-    } catch(e) { console.error("Error deleting appt", e); }
+    try { await deleteDoc(doc(db, 'appointments', id)); } catch(e) { console.error(e); }
   };
 
   const handleUpdateAppointment = async (id, updatedData) => {
     if (!user || !db) return;
-    try {
-      await updateDoc(doc(db, 'appointments', id), updatedData);
-    } catch(e) { console.error("Error updating appt", e); }
+    try { await updateDoc(doc(db, 'appointments', id), updatedData); } catch(e) { console.error(e); }
   };
 
   const handleUpdateSetting = async (field, value) => {
     if (!user || !db) return;
-    try {
-      await setDoc(doc(db, 'settings', 'main'), {
-        [field]: value
-      }, { merge: true });
-    } catch(e) { console.error("Error updating setting", e); }
+    try { await setDoc(doc(db, 'settings', 'main'), { [field]: value }, { merge: true }); } catch(e) { console.error(e); }
+  };
+
+  const handleUpdateCustomerNote = async (phone, notes) => {
+    if (!user || !db) return;
+    try { await setDoc(doc(db, 'customers', phone), { persistentNotes: notes }, { merge: true }); } catch(e) { console.error(e); }
   };
 
   const handleAdminLogin = () => {
     if (pin === '1504') {
-      setIsAdminAuthenticated(true);
-      setView('admin');
-      setPin('');
-      setPinError(false);
-    } else {
-      setPinError(true);
-      setPin('');
-    }
+      setIsAdminAuthenticated(true); setView('admin'); setPin(''); setPinError(false);
+    } else { setPinError(true); setPin(''); }
   };
 
   if (loadingData && !user) {
     return (
       <div className="min-h-screen bg-rose-50 flex flex-col items-center justify-center font-sans" dir="rtl">
-        <div className="animate-bounce mb-4 text-pink-500">
-          <Heart size={48} fill="currentColor" />
-        </div>
+        <div className="animate-bounce mb-4 text-pink-500"><Heart size={48} fill="currentColor" /></div>
         <h2 className="text-xl font-bold text-gray-800">טוען את היומן של Lihi Nails... 💅</h2>
       </div>
     );
   }
 
-  // הגנה נוספת, אם נשמר קישור של התמונה הישנה במסד נתונים, אנחנו דורסים אותו
   const isOldImage = logoUrl && logoUrl.includes('images.unsplash.com');
   const finalLogoUrl = isOldImage || !logoUrl || logoUrl.trim() === '' ? DEFAULT_LOGO_URL : logoUrl;
   const handleImageError = (e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; };
@@ -258,15 +220,7 @@ function LihiNailsApp() {
             </div>
             <button 
               onClick={() => {
-                if (view === 'customer') {
-                  if (isAdminAuthenticated) {
-                    setView('admin');
-                  } else {
-                    setView('auth');
-                  }
-                } else {
-                  setView('customer');
-                }
+                if (view === 'customer') { isAdminAuthenticated ? setView('admin') : setView('auth'); } else { setView('customer'); }
               }}
               className="p-2 text-gray-400 hover:text-pink-600 transition-colors rounded-full hover:bg-pink-50"
               title={view === 'customer' ? 'כניסת מנהלת' : 'חזרה לתצוגת לקוח'}
@@ -279,87 +233,41 @@ function LihiNailsApp() {
         <main className="max-w-md mx-auto min-h-[calc(100vh-80px)] bg-white/95 backdrop-blur-md shadow-2xl sm:rounded-b-3xl overflow-hidden relative border-x border-b border-white/50">
           {view === 'customer' && (
             <CustomerView 
-              schedule={schedule}
-              blockedDates={blockedDates || []}
-              blockedTimeSlots={blockedTimeSlots || {}}
-              services={services || []}
-              extras={extras || []}
-              appointments={appointments} 
-              onBook={handleAddAppointment} 
-              logoUrl={finalLogoUrl}
+              schedule={schedule} blockedDates={blockedDates || []} blockedTimeSlots={blockedTimeSlots || {}}
+              services={services || []} extras={extras || []} appointments={appointments} 
+              onBook={handleAddAppointment} logoUrl={finalLogoUrl}
             />
           )}
           
           {view === 'auth' && (
             <div className="p-8 flex flex-col items-center justify-center h-full min-h-[60vh] text-center fade-in bg-white/90">
-              <img src={finalLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-24 h-24 rounded-full border-4 border-pink-100 shadow-md mb-6 object-cover bg-white" />
+              <img src={finalLogoUrl} onError={handleImageError} alt="לוגו" className="w-24 h-24 rounded-full border-4 border-pink-100 shadow-md mb-6 object-cover bg-white" />
               <h2 className="text-2xl font-bold text-gray-800 mb-2">כניסת מנהלת 👑</h2>
-              <p className="text-gray-500 mb-8 text-sm">היי ליהיא! הקלידי את קוד הגישה שלך כדי לנהל את התורים:</p>
-              
+              <p className="text-gray-500 mb-8 text-sm">היי ליהיא! הקלידי את קוד הגישה שלך:</p>
               <div className="w-full max-w-[250px]">
                 <input 
-                  type="password" 
-                  value={pin}
-                  onChange={(e) => {
-                    setPin(e.target.value);
-                    setPinError(false);
-                  }}
+                  type="password" value={pin} onChange={(e) => { setPin(e.target.value); setPinError(false); }}
                   onKeyDown={(e) => e.key === 'Enter' && handleAdminLogin()}
-                  className={`text-center text-3xl tracking-[0.5em] w-full p-4 bg-gray-50 border-2 ${pinError ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:border-pink-400'} rounded-2xl outline-none transition-all mb-2`}
-                  placeholder="****"
-                  maxLength={4}
-                  dir="ltr"
+                  className={`text-center text-3xl tracking-[0.5em] w-full p-4 bg-gray-50 border-2 ${pinError ? 'border-red-500 bg-red-50' : 'border-gray-200 focus:border-pink-400'} rounded-2xl outline-none mb-2`}
+                  placeholder="****" maxLength={4} dir="ltr"
                 />
-                <div className="h-6 mb-4">
-                  {pinError && <p className="text-red-500 text-xs font-bold animate-pulse">קוד שגוי, נסי שוב.</p>}
-                </div>
-                
-                <button 
-                  onClick={handleAdminLogin}
-                  className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-pink-700 transition-colors shadow-lg shadow-pink-200 mb-4"
-                >
-                  היכנסי ליומן
-                </button>
-                <button 
-                  onClick={() => { setView('customer'); setPin(''); setPinError(false); }}
-                  className="text-gray-500 font-medium hover:text-pink-600 underline text-sm"
-                >
-                  חזרה למסך הראשי
-                </button>
+                <div className="h-6 mb-4">{pinError && <p className="text-red-500 text-xs font-bold animate-pulse">קוד שגוי, נסי שוב.</p>}</div>
+                <button onClick={handleAdminLogin} className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-pink-700 shadow-lg mb-4">היכנסי ליומן</button>
+                <button onClick={() => { setView('customer'); setPin(''); setPinError(false); }} className="text-gray-500 font-medium hover:text-pink-600 underline text-sm">חזרה למסך הראשי</button>
               </div>
             </div>
           )}
 
           {view === 'admin' && (
             <AdminView 
-              schedule={schedule}
-              blockedDates={blockedDates || []}
-              blockedTimeSlots={blockedTimeSlots || {}}
-              services={services || []}
-              extras={extras || []}
-              appointments={appointments} 
-              logoUrl={finalLogoUrl}
-              whatsappTemplate={whatsappTemplate}
-              onUpdateSetting={handleUpdateSetting}
-              onDeleteAppointment={handleDeleteAppointment}
-              onUpdateAppointment={handleUpdateAppointment}
+              schedule={schedule} blockedDates={blockedDates || []} blockedTimeSlots={blockedTimeSlots || {}}
+              services={services || []} extras={extras || []} appointments={appointments} customersData={customersData}
+              logoUrl={finalLogoUrl} whatsappTemplate={whatsappTemplate} onUpdateSetting={handleUpdateSetting}
+              onDeleteAppointment={handleDeleteAppointment} onUpdateAppointment={handleUpdateAppointment}
+              onUpdateCustomerNote={handleUpdateCustomerNote}
             />
           )}
         </main>
-
-        {view === 'customer' && (
-          <a
-            href="http://wa.me/972533033385"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="fixed bottom-6 left-6 bg-[#25D366] text-white p-4 rounded-full shadow-lg hover:scale-110 transition-transform z-50 flex items-center justify-center border-2 border-white"
-            title="דברי איתי בווצאפ"
-          >
-            <svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
-            </svg>
-          </a>
-        )}
       </div>
 
       <style dangerouslySetInnerHTML={{__html: `
@@ -388,10 +296,30 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
   const [currentMonth, setCurrentMonth] = useState(new Date());
   
   const [formData, setFormData] = useState({ name: '', phone: '', notes: '' });
+  const [upcomingAppt, setUpcomingAppt] = useState(null);
+
+  useEffect(() => {
+    try {
+      const savedUser = localStorage.getItem('lihi_user_data');
+      const savedAppt = localStorage.getItem('lihi_upcoming_appt');
+      if (savedUser && savedAppt) {
+        const parsedAppt = JSON.parse(savedAppt);
+        const parsedUser = JSON.parse(savedUser);
+        
+        const pad = n => n.toString().padStart(2, '0');
+        const today = new Date();
+        const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+        
+        if (parsedAppt.date >= todayStr) {
+          setUpcomingAppt({ ...parsedUser, ...parsedAppt });
+          setFormData({ name: parsedUser.name || '', phone: parsedUser.phone || '', notes: '' });
+        }
+      }
+    } catch (e) { console.error("Error reading localStorage", e); }
+  }, []);
 
   const toggleService = (s) => setSelectedServices(prev => prev.find(x => x.id === s.id) ? prev.filter(x => x.id !== s.id) : [...prev, s]);
   const toggleExtra = (e) => setSelectedExtras(prev => prev.find(x => x.id === e.id) ? prev.filter(x => x.id !== e.id) : [...prev, e]);
-  
   const totalHours = selectedServices.reduce((sum, s) => sum + (Number(s.hours) || 1), 0);
 
   const getAvailableHoursForDate = (dateString) => {
@@ -435,10 +363,18 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
   const submitBooking = (e) => {
     e.preventDefault();
     if (!selectedDate || !selectedTime || !formData.name || !formData.phone || selectedServices.length === 0) return;
+    
     const blockedHours = [];
     const [baseH] = selectedTime.split(':').map(Number);
     for (let i = 0; i < totalHours; i++) { blockedHours.push(`${(baseH + i).toString().padStart(2, '0')}:00`); }
+    
     onBook({ date: selectedDate, time: selectedTime, blockedHours, services: selectedServices, extras: selectedExtras, totalHours, ...formData });
+    
+    try {
+      localStorage.setItem('lihi_user_data', JSON.stringify({ name: formData.name, phone: formData.phone }));
+      localStorage.setItem('lihi_upcoming_appt', JSON.stringify({ date: selectedDate, time: selectedTime }));
+    } catch(e) {}
+
     setStep(4);
   };
 
@@ -527,7 +463,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
               <div key={dateStr} className="px-0.5">
                 <button 
                   disabled={!isSelectable}
-                  onClick={() => handleDateSelect(dateStr)}
+                  onClick={() => { setSelectedDate(dateStr); setSelectedTime(''); }}
                   className={cellClass}
                 >
                   <span className={textClass}>{date.getDate()}</span>
@@ -543,16 +479,12 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
 
   const generateGoogleCalendarLink = () => {
     const d = new Date(selectedDate);
+    if(!selectedDate || !selectedTime) return '#';
     const [hours, minutes] = selectedTime.split(':');
     d.setHours(parseInt(hours), parseInt(minutes), 0);
     const endD = new Date(d.getTime() + totalHours * 60 * 60 * 1000); 
     const formatForGcal = (date) => `${date.getFullYear()}${pad(date.getMonth()+1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}00`;
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('תור לציפורניים אצל Lihi Nails 💅')}&dates=${formatForGcal(d)}/${formatForGcal(endD)}&details=${encodeURIComponent('זמן הפינוק שלך הגיע!')}`;
-  };
-
-  const handleDateSelect = (dateStr) => {
-      setSelectedDate(dateStr);
-      setSelectedTime('');
   };
 
   return (
@@ -571,6 +503,20 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
 
       {step === 1 && (
         <div className="px-5 mt-6 fade-in h-full flex flex-col">
+          {/* מציג את התור הקרוב מהזיכרון של הטלפון */}
+          {upcomingAppt && (
+            <div className="bg-white p-4 rounded-2xl shadow-sm border-2 border-pink-400 mb-6 relative overflow-hidden animate-slide-up">
+              <div className="absolute left-0 top-0 bottom-0 w-2 bg-pink-500"></div>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-pink-700 font-black text-sm mb-1">היי {upcomingAppt.name}, התור הבא שלך:</h3>
+                  <div className="text-gray-800 font-bold text-lg">{upcomingAppt.date.split('-').reverse().join('/')} בשעה {upcomingAppt.time}</div>
+                </div>
+                <button onClick={() => { localStorage.removeItem('lihi_upcoming_appt'); setUpcomingAppt(null); }} className="text-gray-400 hover:text-gray-600 p-1"><X size={16}/></button>
+              </div>
+            </div>
+          )}
+
           <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Heart className="text-pink-500" size={20} /> איזה טיפולים תרצי היום?</h3>
           <div className="space-y-3 flex-1">
             {services.map(service => {
@@ -625,8 +571,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <button onClick={() => setStep(1)} className="text-gray-500 mb-4 flex items-center gap-1 hover:text-pink-600 transition-colors w-fit"><ArrowRight size={16} /> חזרה לטיפולים</button>
           
           <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-pink-500" size={20} /> מתי נוח לך?</h3>
-          
-          {/* הלוח שנה החדש והמעודכן */}
           {renderCalendar()}
 
           {selectedDate && (
@@ -662,7 +606,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <form onSubmit={submitBooking} className="space-y-5 flex-1 pb-4 text-right" dir="rtl">
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">שם מלא <span className="text-red-500">*</span></label>
-              {/* --- התיקון של השם: "איך קוראים לך?" בלבד --- */}
               <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-pink-400 outline-none transition-all" placeholder="איך קוראים לך?" dir="rtl" />
             </div>
             <div>
@@ -697,7 +640,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <div className="w-full space-y-3 mb-6 mt-4">
             <a href={generateGoogleCalendarLink()} target="_blank" rel="noopener noreferrer" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg hover:bg-blue-700 transition-colors"><CalendarPlus size={24} /> הוספה ל-Google Calendar</a>
           </div>
-          <button onClick={() => { setStep(1); setSelectedServices([]); setSelectedExtras([]); setSelectedDate(''); setSelectedTime(''); setFormData({ name: '', phone: '', notes: '' }); }} className="mt-8 text-gray-500 font-medium underline hover:text-pink-600 transition-colors">חזרה לדף הראשי</button>
+          <button onClick={() => { setStep(1); setSelectedServices([]); setSelectedExtras([]); setSelectedDate(''); setSelectedTime(''); setFormData({ name: '', phone: '', notes: '' }); window.location.reload(); }} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-gray-800 transition-colors">סיום וחזרה לראשי</button>
         </div>
       )}
     </div>
@@ -707,7 +650,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
 // ==========================================
 //              צד מנהלת (Admin View)
 // ==========================================
-function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras, appointments, logoUrl, whatsappTemplate, onUpdateSetting, onDeleteAppointment, onUpdateAppointment }) {
+function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras, appointments, customersData, logoUrl, whatsappTemplate, onUpdateSetting, onDeleteAppointment, onUpdateAppointment, onUpdateCustomerNote }) {
   const [activeTab, setActiveTab] = useState('appointments');
   const [lastCheckedNotes, setLastCheckedNotes] = useState(() => parseInt(localStorage.getItem('lihi_last_notif')) || Date.now());
   const tabsRef = useRef(null);
@@ -737,39 +680,124 @@ function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras,
       </div>
 
       <div className="flex items-center px-2 mt-6 gap-1 w-full">
-        <button onClick={() => tabsRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
-          <ChevronRight size={18} />
-        </button>
+        <button onClick={() => tabsRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10"><ChevronRight size={18} /></button>
         
         <div ref={tabsRef} className="flex gap-3 overflow-x-auto hide-scrollbar pb-2 flex-nowrap flex-1 scroll-smooth" dir="rtl" style={{ WebkitOverflowScrolling: 'touch' }}>
-          <button onClick={() => handleTabClick('appointments')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'appointments' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            <Calendar size={16} /> תורים
-          </button>
-          <button onClick={() => handleTabClick('analytics')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'analytics' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            <BarChart3 size={16} /> הכנסות
-          </button>
-          <button onClick={() => handleTabClick('menu')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'menu' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            <PlusCircle size={16} /> טיפולים
-          </button>
-          <button onClick={() => handleTabClick('broadcast')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'broadcast' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            <Megaphone size={16} /> תפוצה
-          </button>
-          <button onClick={() => handleTabClick('settings')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'settings' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            <Settings size={16} /> הגדרות
-          </button>
+          <button onClick={() => handleTabClick('appointments')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'appointments' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}><Calendar size={16} /> תורים</button>
+          <button onClick={() => handleTabClick('customers')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'customers' ? 'bg-blue-100 text-blue-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}><Users size={16} /> לקוחות</button>
+          <button onClick={() => handleTabClick('analytics')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'analytics' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}><BarChart3 size={16} /> הכנסות</button>
+          <button onClick={() => handleTabClick('menu')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'menu' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}><PlusCircle size={16} /> טיפולים</button>
+          <button onClick={() => handleTabClick('broadcast')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'broadcast' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}><Megaphone size={16} /> תפוצה</button>
+          <button onClick={() => handleTabClick('settings')} className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 font-bold text-sm rounded-xl transition-all whitespace-nowrap ${activeTab === 'settings' ? 'bg-pink-100 text-pink-700 shadow-sm' : 'bg-white text-gray-500 border border-gray-200'}`}><Settings size={16} /> הגדרות</button>
         </div>
 
-        <button onClick={() => tabsRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
-          <ChevronLeft size={18} />
-        </button>
+        <button onClick={() => tabsRef.current?.scrollBy({left: -200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10"><ChevronLeft size={18} /></button>
       </div>
 
       <div className="p-4 flex-1 overflow-y-auto" dir="rtl">
         {activeTab === 'appointments' && <AdminAppointmentsList appointments={appointments} onDeleteAppointment={onDeleteAppointment} onUpdateAppointment={onUpdateAppointment} whatsappTemplate={whatsappTemplate} />}
+        {activeTab === 'customers' && <AdminCustomersList appointments={appointments} customersData={customersData} onUpdateCustomerNote={onUpdateCustomerNote} />}
         {activeTab === 'analytics' && <AdminAnalytics appointments={appointments} />}
         {activeTab === 'menu' && <AdminMenuManager services={services} extras={extras} onUpdateSetting={onUpdateSetting} />}
-        {activeTab === 'broadcast' && <AdminBroadcast appointments={appointments} />}
         {activeTab === 'settings' && <AdminScheduleSettings schedule={schedule} blockedDates={blockedDates} blockedTimeSlots={blockedTimeSlots} logoUrl={logoUrl} whatsappTemplate={whatsappTemplate} onUpdateSetting={onUpdateSetting} />}
+      </div>
+    </div>
+  );
+}
+
+function AdminCustomersList({ appointments, customersData, onUpdateCustomerNote }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedCustomer, setExpandedCustomer] = useState(null);
+  const [tempNotes, setTempNotes] = useState({});
+
+  const cleanPhoneStr = (p) => p ? p.replace(/\D/g, '') : 'unknown';
+
+  const customersMap = {};
+  appointments.forEach(appt => {
+    const phone = cleanPhoneStr(appt.phone);
+    if (!customersMap[phone]) {
+      customersMap[phone] = { phone: appt.phone, cleanPhone: phone, name: appt.name, totalVisits: 0, totalSpent: 0, lastVisit: '', appointments: [] };
+    }
+    
+    let apptTotal = 0;
+    [...(appt.services || []), ...(appt.extras || [])].forEach(item => {
+      if (item.price) apptTotal += Number(item.price);
+      else { const match = item.label ? item.label.match(/(\d+)\s*₪/) : null; if (match) apptTotal += parseInt(match[1]); }
+    });
+
+    customersMap[phone].totalVisits += 1;
+    customersMap[phone].totalSpent += apptTotal;
+    customersMap[phone].appointments.push(appt);
+
+    if (!customersMap[phone].lastVisit || appt.date > customersMap[phone].lastVisit) {
+      customersMap[phone].lastVisit = appt.date;
+      customersMap[phone].name = appt.name;
+    }
+  });
+
+  const allCustomers = Object.values(customersMap).map(c => {
+    const savedData = customersData.find(cd => cd.phone === c.cleanPhone);
+    return { ...c, persistentNotes: savedData?.persistentNotes || '' };
+  });
+
+  const filteredCustomers = allCustomers.filter(c => 
+    c.name.includes(searchTerm) || c.cleanPhone.includes(searchTerm) || (c.phone && c.phone.includes(searchTerm))
+  ).sort((a, b) => b.totalVisits - a.totalVisits);
+
+  const handleSaveNotes = (phone) => {
+    onUpdateCustomerNote(phone, tempNotes[phone] || '');
+    setExpandedCustomer(null);
+  };
+
+  return (
+    <div className="pb-10 fade-in">
+      <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-4 flex items-center gap-3">
+        <Search className="text-gray-400" size={20} />
+        <input type="text" placeholder="חיפוש לקוחה לפי שם או טלפון..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full text-sm outline-none bg-transparent" />
+      </div>
+
+      <div className="space-y-3">
+        {filteredCustomers.map(customer => {
+          const isExpanded = expandedCustomer === customer.cleanPhone;
+          return (
+            <div key={customer.cleanPhone} className={`bg-white rounded-2xl shadow-sm border transition-all ${isExpanded ? 'border-blue-400 ring-2 ring-blue-50' : 'border-gray-100'}`}>
+              <div className="p-4 flex justify-between items-center cursor-pointer" onClick={() => {
+                if (isExpanded) setExpandedCustomer(null);
+                else { setExpandedCustomer(customer.cleanPhone); setTempNotes({ ...tempNotes, [customer.cleanPhone]: customer.persistentNotes }); }
+              }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-lg">
+                    {customer.name.charAt(0)}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-900">{customer.name}</h3>
+                    <p className="text-xs text-gray-500" dir="ltr">{customer.phone}</p>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm font-black text-blue-600">{customer.totalVisits} תורים</div>
+                  <div className="text-[10px] text-gray-400">הכניסה: ₪{customer.totalSpent}</div>
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="p-4 border-t border-gray-100 bg-blue-50/30 animate-slide-up rounded-b-2xl">
+                  <label className="block text-xs font-bold text-gray-700 mb-2">📝 הערות קבועות ללקוחה (נשמר במערכת):</label>
+                  <textarea 
+                    value={tempNotes[customer.cleanPhone] !== undefined ? tempNotes[customer.cleanPhone] : customer.persistentNotes}
+                    onChange={(e) => setTempNotes({ ...tempNotes, [customer.cleanPhone]: e.target.value })}
+                    className="w-full p-3 border border-blue-200 rounded-xl text-sm h-24 resize-none focus:ring-2 focus:ring-blue-400 outline-none mb-3 bg-white" 
+                    placeholder="למשל: רגישה לאציטון, אוהבת צורה מרובעת..."
+                  />
+                  <button onClick={() => handleSaveNotes(customer.cleanPhone)} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-sm flex justify-center items-center gap-2">
+                    <Save size={16} /> שמור הערות ללקוחה
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {filteredCustomers.length === 0 && <div className="text-center text-gray-400 py-10">לא נמצאו לקוחות במערכת.</div>}
       </div>
     </div>
   );
@@ -794,6 +822,13 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
     const servicesText = appt.services ? appt.services.map(s => s.label.split('-')[0].trim()).join(', ') : '';
     const formattedDate = appt.date ? appt.date.split('-').reverse().join('/') : '';
     let message = whatsappTemplate.replace(/\[שם_לקוחה\]/g, appt.name || '').replace(/\[תאריך\]/g, formattedDate).replace(/\[שעה\]/g, appt.time || '').replace(/\[טיפולים\]/g, servicesText);
+    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  const sendWhatsAppReminder = (appt) => {
+    let cleanPhone = appt.phone ? appt.phone.replace(/\D/g, '') : '';
+    if (cleanPhone.startsWith('0')) cleanPhone = '972' + cleanPhone.substring(1);
+    const message = `היי ${appt.name || ''}, תזכורת לתור שלנו מחר בשעה ${appt.time}! תאשרי לי שאת מגיעה 💖`;
     window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
@@ -870,7 +905,8 @@ function AdminAppointmentsList({ appointments, onDeleteAppointment, onUpdateAppo
                       {appt.notes && <div className="mt-2 text-xs text-gray-600 bg-orange-50 border border-orange-100 p-2 rounded-lg"><span className="font-bold">הערות:</span> {appt.notes}</div>}
                     </div>
                     <div className="flex flex-col gap-2 pl-2 border-r border-gray-100 pr-3">
-                      <button onClick={() => sendWhatsAppConfirmation(appt)} className="w-8 h-8 rounded-full bg-[#25D366]/10 text-[#25D366] flex items-center justify-center hover:bg-[#25D366]/20 transition-colors shadow-sm"><MessageCircle size={16} /></button>
+                      <button onClick={() => sendWhatsAppReminder(appt)} className="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center hover:bg-purple-100 transition-colors shadow-sm" title="שליחת תזכורת בוואטסאפ"><Clock size={16} /></button>
+                      <button onClick={() => sendWhatsAppConfirmation(appt)} className="w-8 h-8 rounded-full bg-[#25D366]/10 text-[#25D366] flex items-center justify-center hover:bg-[#25D366]/20 transition-colors shadow-sm" title="אישור תור"><MessageCircle size={16} /></button>
                       <button onClick={() => handleEditClick(appt)} className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center hover:bg-blue-100 transition-colors shadow-sm"><Edit2 size={16} /></button>
                       <button onClick={() => { if(window.confirm('למחוק תור זה?')) onDeleteAppointment(appt.id); }} className="w-8 h-8 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-colors shadow-sm"><X size={16} /></button>
                     </div>
@@ -1004,7 +1040,6 @@ function AdminMenuManager({ services, extras, onUpdateSetting }) {
 
   return (
     <div className="pb-10">
-      {/* ניהול טיפולים מרכזיים */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Star className="text-pink-500" size={18}/> ניהול טיפולים</h3>
         
@@ -1035,7 +1070,6 @@ function AdminMenuManager({ services, extras, onUpdateSetting }) {
         </div>
       </div>
 
-      {/* ניהול תוספות */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><PlusCircle className="text-blue-500" size={18}/> ניהול תוספות</h3>
         
