@@ -51,7 +51,7 @@ const DEFAULT_SERVICES = [
 ];
 
 const DEFAULT_EXTRAS = [
-  { id: 'extra_nail', label: '⭐ השלמת ציפורן - 10₪', price: 10 },
+  { id: 'extra_nail', label: '⭐ השלמת ציפורן - 10 ₪', price: 10 },
   { id: 'extra_art', label: '🎨 קישוטים בסיסיים - 10 ₪', price: 10 },
   { id: 'extra_fix', label: '🛠️ תיקון ציפורן - 20 ₪', price: 20 }
 ];
@@ -67,7 +67,8 @@ const DEFAULT_WHATSAPP_TEMPLATE = `היי [שם_לקוחה] המהממת! 🌸
 
 מחכה לך לזמן של פינוק! 💖`;
 
-const DEFAULT_LOGO_URL = 'https://images.unsplash.com/photo-1604654894610-df63bc536371?q=80&w=400&auto=format&fit=crop';
+// התיקון העיקרי: מפנה ישירות ללוגו המקומי שלך
+const DEFAULT_LOGO_URL = '/LOGO.jpeg';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -115,7 +116,6 @@ function LihiNailsApp() {
   const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
   const [logoUrl, setLogoUrl] = useState(DEFAULT_LOGO_URL);
 
-  // הליך התחברות טהור - רק מול ה-Firebase של ליהיא
   useEffect(() => {
     if (!auth) {
       setLoadingData(false);
@@ -140,12 +140,12 @@ function LihiNailsApp() {
     });
     
     return () => unsubscribe();
-  }, [user]);
+  }, []);
 
-  // משיכת הנתונים ישירות מהתיקיות האמיתיות (appointments, settings)
   useEffect(() => {
     if (!user || !db) return;
 
+    // משיכת נתונים ישירות מהתיקיות האמיתיות שלך
     const unsubAppts = onSnapshot(collection(db, 'appointments'), (snapshot) => {
       const loadedAppts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setAppointments(loadedAppts);
@@ -237,7 +237,9 @@ function LihiNailsApp() {
     );
   }
 
-  const safeLogoUrl = logoUrl && logoUrl.trim() !== '' ? logoUrl : DEFAULT_LOGO_URL;
+  // הגנה נוספת, אם נשמר קישור של התמונה הישנה במסד נתונים, אנחנו דורסים אותו
+  const isOldImage = logoUrl && logoUrl.includes('images.unsplash.com');
+  const finalLogoUrl = isOldImage || !logoUrl || logoUrl.trim() === '' ? DEFAULT_LOGO_URL : logoUrl;
   const handleImageError = (e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; };
 
   return (
@@ -248,7 +250,7 @@ function LihiNailsApp() {
         <header className="bg-white/90 backdrop-blur-md shadow-sm sticky top-0 z-20">
           <div className="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
             <div className="flex items-center gap-2">
-              <img src={safeLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-12 h-12 rounded-full object-cover border-2 border-pink-200 shadow-sm bg-white" />
+              <img src={finalLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-12 h-12 rounded-full object-cover border-2 border-pink-200 shadow-sm bg-white" />
               <div>
                 <h1 className="text-xl font-bold text-gray-900 leading-tight">Lihi Nails 💅✨</h1>
                 <p className="text-xs text-pink-600 font-bold">האומנות שלי, הציפורניים שלך 💎</p>
@@ -284,13 +286,13 @@ function LihiNailsApp() {
               extras={extras || []}
               appointments={appointments} 
               onBook={handleAddAppointment} 
-              logoUrl={safeLogoUrl}
+              logoUrl={finalLogoUrl}
             />
           )}
           
           {view === 'auth' && (
             <div className="p-8 flex flex-col items-center justify-center h-full min-h-[60vh] text-center fade-in bg-white/90">
-              <img src={safeLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-24 h-24 rounded-full border-4 border-pink-100 shadow-md mb-6 object-cover bg-white" />
+              <img src={finalLogoUrl} onError={handleImageError} alt="לוגו Lihi Nails" className="w-24 h-24 rounded-full border-4 border-pink-100 shadow-md mb-6 object-cover bg-white" />
               <h2 className="text-2xl font-bold text-gray-800 mb-2">כניסת מנהלת 👑</h2>
               <p className="text-gray-500 mb-8 text-sm">היי ליהיא! הקלידי את קוד הגישה שלך כדי לנהל את התורים:</p>
               
@@ -336,7 +338,7 @@ function LihiNailsApp() {
               services={services || []}
               extras={extras || []}
               appointments={appointments} 
-              logoUrl={safeLogoUrl}
+              logoUrl={finalLogoUrl}
               whatsappTemplate={whatsappTemplate}
               onUpdateSetting={handleUpdateSetting}
               onDeleteAppointment={handleDeleteAppointment}
@@ -660,6 +662,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <form onSubmit={submitBooking} className="space-y-5 flex-1 pb-4 text-right" dir="rtl">
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">שם מלא <span className="text-red-500">*</span></label>
+              {/* --- התיקון של השם: "איך קוראים לך?" בלבד --- */}
               <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-pink-400 outline-none transition-all" placeholder="איך קוראים לך?" dir="rtl" />
             </div>
             <div>
@@ -734,7 +737,6 @@ function AdminView({ schedule, blockedDates, blockedTimeSlots, services, extras,
       </div>
 
       <div className="flex items-center px-2 mt-6 gap-1 w-full">
-        {/* חצים מתוקנים לעברית: ימינה זה אחורה, שמאלה זה קדימה */}
         <button onClick={() => tabsRef.current?.scrollBy({left: 200, behavior:'smooth'})} className="p-2 bg-white border border-gray-200 rounded-full hover:bg-pink-50 shadow-sm flex-shrink-0 text-gray-600 z-10">
           <ChevronRight size={18} />
         </button>
