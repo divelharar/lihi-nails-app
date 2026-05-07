@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle, AlertCircle, Bell, BarChart3, Megaphone, Copy, Check, TrendingUp, Plus, Trash2, CalendarOff, Users, Search, Save } from 'lucide-react';
+import { Calendar, Clock, Heart, Star, CheckCircle, Settings, User, ArrowRight, CalendarPlus, X, Menu, ChevronLeft, ChevronRight, Edit2, ChevronDown, ChevronUp, PlusCircle, MessageCircle, AlertCircle, Bell, BarChart3, Megaphone, Copy, Check, TrendingUp, Plus, Trash2, CalendarOff, Users, Search, Save, LogOut, CalendarX, CalendarClock } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -235,7 +235,7 @@ function LihiNailsApp() {
             <CustomerView 
               schedule={schedule} blockedDates={blockedDates || []} blockedTimeSlots={blockedTimeSlots || {}}
               services={services || []} extras={extras || []} appointments={appointments} 
-              onBook={handleAddAppointment} logoUrl={finalLogoUrl}
+              onBook={handleAddAppointment} onDelete={handleDeleteAppointment} onUpdate={handleUpdateAppointment} logoUrl={finalLogoUrl}
             />
           )}
           
@@ -285,7 +285,11 @@ function LihiNailsApp() {
 // ==========================================
 //              צד לקוח (Customer View)
 // ==========================================
-function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extras, appointments, onBook, logoUrl }) {
+function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extras, appointments, onBook, onDelete, onUpdate, logoUrl }) {
+  const [screen, setScreen] = useState('login'); // 'login', 'dashboard', 'booking'
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginName, setLoginName] = useState('');
+  
   const [step, setStep] = useState(1); 
   const [selectedServices, setSelectedServices] = useState([]);
   const [selectedExtras, setSelectedExtras] = useState([]);
@@ -296,51 +300,116 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
   const [currentMonth, setCurrentMonth] = useState(new Date());
   
   const [formData, setFormData] = useState({ name: '', phone: '', notes: '' });
-  const [upcomingAppt, setUpcomingAppt] = useState(null);
+  const [rescheduleAppt, setRescheduleAppt] = useState(null);
+  const [cancelPrompt, setCancelPrompt] = useState(null);
 
   useEffect(() => {
     try {
-      const savedUser = localStorage.getItem('lihi_user_data');
-      const savedAppt = localStorage.getItem('lihi_upcoming_appt');
-      if (savedUser && savedAppt) {
-        const parsedAppt = JSON.parse(savedAppt);
-        const parsedUser = JSON.parse(savedUser);
-        
-        const pad = n => n.toString().padStart(2, '0');
-        const today = new Date();
-        const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-        
-        if (parsedAppt.date >= todayStr) {
-          setUpcomingAppt({ ...parsedUser, ...parsedAppt });
-          setFormData({ name: parsedUser.name || '', phone: parsedUser.phone || '', notes: '' });
-        }
+      const savedPhone = localStorage.getItem('lihi_cust_phone');
+      const savedName = localStorage.getItem('lihi_cust_name');
+      if (savedPhone) {
+        setLoginPhone(savedPhone);
+        setLoginName(savedName || '');
+        setFormData({ name: savedName || '', phone: savedPhone, notes: '' });
+        setScreen('dashboard');
       }
     } catch (e) { console.error("Error reading localStorage", e); }
   }, []);
 
+  const handleLoginSubmit = (e) => {
+    e.preventDefault();
+    if (!loginPhone) return;
+    localStorage.setItem('lihi_cust_phone', loginPhone);
+    localStorage.setItem('lihi_cust_name', loginName);
+    setFormData({ name: loginName, phone: loginPhone, notes: '' });
+    setScreen('dashboard');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('lihi_cust_phone');
+    localStorage.removeItem('lihi_cust_name');
+    setLoginPhone('');
+    setLoginName('');
+    setScreen('login');
+  };
+
+  const pad = n => n.toString().padStart(2, '0');
+  const getTodayStr = () => {
+    const today = new Date();
+    return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  };
+
+  const myAppointments = appointments.filter(a => {
+    const cleanA = a.phone?.replace(/\D/g, '') || '';
+    const cleanL = loginPhone.replace(/\D/g, '');
+    return cleanA === cleanL && a.date >= getTodayStr();
+  }).sort((a,b) => {
+    const dateA = new Date(`${a.date}T${a.time}`);
+    const dateB = new Date(`${b.date}T${b.time}`);
+    return dateA - dateB;
+  });
+
+  const startNewBooking = () => {
+    setRescheduleAppt(null);
+    setSelectedServices([]);
+    setSelectedExtras([]);
+    setSelectedDate('');
+    setSelectedTime('');
+    setFormData({ ...formData, notes: '' });
+    setStep(1);
+    setScreen('booking');
+  };
+
+  const startReschedule = (appt) => {
+    setRescheduleAppt(appt);
+    setSelectedServices(appt.services || []);
+    setSelectedExtras(appt.extras || []);
+    setSelectedDate('');
+    setSelectedTime('');
+    setFormData({ name: appt.name, phone: appt.phone, notes: appt.notes || '' });
+    setStep(2); // דולגים ישר לבחירת תאריך במקרה של דחייה
+    setScreen('booking');
+  };
+
+  const confirmCancel = (appt) => {
+    const apptDate = new Date(`${appt.date}T${appt.time}`);
+    const now = new Date();
+    const diffHours = (apptDate - now) / (1000 * 60 * 60);
+    
+    setCancelPrompt({
+      appt,
+      isLateCancel: diffHours < 24
+    });
+  };
+
+  const executeCancel = () => {
+    if (cancelPrompt && cancelPrompt.appt) {
+      onDelete(cancelPrompt.appt.id);
+    }
+    setCancelPrompt(null);
+  };
+
   const toggleService = (s) => setSelectedServices(prev => prev.find(x => x.id === s.id) ? prev.filter(x => x.id !== s.id) : [...prev, s]);
   const toggleExtra = (e) => setSelectedExtras(prev => prev.find(x => x.id === e.id) ? prev.filter(x => x.id !== e.id) : [...prev, e]);
+  
   const totalHours = selectedServices.reduce((sum, s) => sum + (Number(s.hours) || 1), 0);
 
   const getAvailableHoursForDate = (dateString) => {
     if (!dateString) return [];
-    
-    // סינון ימים חסומים לחלוטין
     if (blockedDates && blockedDates.includes(dateString)) return [];
     
     const dateObj = new Date(dateString);
     const hoursForDay = schedule[dateObj.getDay()] || [];
     const bookedHours = [];
     
-    // תורים קיימים
     appointments.forEach(appt => {
-      if (appt.date === dateString) {
+      // אם אנחנו משנים מועד לתור מסוים, הרי שהשעות שלו מתפנות! אז לא נתחשב בו בחסימות.
+      if (appt.date === dateString && (!rescheduleAppt || appt.id !== rescheduleAppt.id)) {
         if (appt.blockedHours) bookedHours.push(...appt.blockedHours);
         else if (appt.time) bookedHours.push(appt.time);
       }
     });
 
-    // שעות שחסומות ספציפית על ידי המנהלת לאותו יום
     if (blockedTimeSlots && blockedTimeSlots[dateString]) {
       bookedHours.push(...blockedTimeSlots[dateString]);
     }
@@ -368,17 +437,17 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
     const [baseH] = selectedTime.split(':').map(Number);
     for (let i = 0; i < totalHours; i++) { blockedHours.push(`${(baseH + i).toString().padStart(2, '0')}:00`); }
     
-    onBook({ date: selectedDate, time: selectedTime, blockedHours, services: selectedServices, extras: selectedExtras, totalHours, ...formData });
+    if (rescheduleAppt) {
+      // עדכון תור קיים
+      onUpdate(rescheduleAppt.id, { date: selectedDate, time: selectedTime, blockedHours, services: selectedServices, extras: selectedExtras, totalHours, ...formData });
+    } else {
+      // יצירת תור חדש
+      onBook({ date: selectedDate, time: selectedTime, blockedHours, services: selectedServices, extras: selectedExtras, totalHours, ...formData });
+    }
     
-    try {
-      localStorage.setItem('lihi_user_data', JSON.stringify({ name: formData.name, phone: formData.phone }));
-      localStorage.setItem('lihi_upcoming_appt', JSON.stringify({ date: selectedDate, time: selectedTime }));
-    } catch(e) {}
-
     setStep(4);
   };
 
-  const pad = n => n.toString().padStart(2, '0');
   const formatDateStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   
   const generateCalendarDays = () => {
@@ -386,7 +455,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
     const month = currentMonth.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
     const days = [];
     for (let i = 0; i < firstDay; i++) days.push(null);
     for (let i = 1; i <= daysInMonth; i++) days.push(new Date(year, month, i));
@@ -408,7 +476,6 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
     return (
       <div className="bg-white rounded-3xl p-4 shadow-sm border border-gray-100 mb-6">
         <div className="flex justify-between items-center mb-4 px-2">
-          {/* חצים מתוקנים לעברית: ימינה = אחורה, שמאלה = קדימה */}
           <button onClick={prevMonth} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-colors"><ChevronRight size={20}/></button>
           <div className="font-bold text-lg text-gray-800">{MONTHS_HE[currentMonth.getMonth()]} {currentMonth.getFullYear()}</div>
           <button onClick={nextMonth} className="p-2 hover:bg-gray-100 rounded-full text-gray-600 transition-colors"><ChevronLeft size={20}/></button>
@@ -436,36 +503,18 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
             let subTextClass = "text-[10px] z-10 leading-none mt-0.5 ";
 
             if (isSelected) {
-              // בחירה
-              cellClass += "bg-pink-600 border-2 border-pink-600 shadow-md transform scale-105";
-              textClass += "text-white";
-              subText = "נבחר";
-              subTextClass += "text-pink-100 font-medium";
+              cellClass += "bg-pink-600 border-2 border-pink-600 shadow-md transform scale-105"; textClass += "text-white"; subText = "נבחר"; subTextClass += "text-pink-100 font-medium";
             } else if (isPast || isClosedDay) {
-              // ימים שעברו או סגורים קבוע
-              cellClass += "opacity-40 cursor-not-allowed border border-transparent";
-              textClass += "text-gray-400 font-normal";
+              cellClass += "opacity-40 cursor-not-allowed border border-transparent"; textClass += "text-gray-400 font-normal";
             } else if (isBlocked || isFull) {
-              // תפוס או חסום על ידי המנהלת
-              cellClass += "bg-gray-700 border-2 border-gray-700";
-              textClass += "text-white";
-              subText = isBlocked ? "סגור" : "תפוס";
-              subTextClass += "text-gray-300 font-medium";
+              cellClass += "bg-gray-700 border-2 border-gray-700"; textClass += "text-white"; subText = isBlocked ? "סגור" : "תפוס"; subTextClass += "text-gray-300 font-medium";
             } else {
-              // פנוי להזמנה
-              cellClass += "bg-pink-50 border-2 border-pink-400 hover:bg-pink-100 cursor-pointer shadow-sm";
-              textClass += "text-pink-800";
-              subText = "פנוי";
-              subTextClass += "text-pink-600 font-black";
+              cellClass += "bg-pink-50 border-2 border-pink-400 hover:bg-pink-100 cursor-pointer shadow-sm"; textClass += "text-pink-800"; subText = "פנוי"; subTextClass += "text-pink-600 font-black";
             }
 
             return (
               <div key={dateStr} className="px-0.5">
-                <button 
-                  disabled={!isSelectable}
-                  onClick={() => { setSelectedDate(dateStr); setSelectedTime(''); }}
-                  className={cellClass}
-                >
+                <button disabled={!isSelectable} onClick={() => { setSelectedDate(dateStr); setSelectedTime(''); }} className={cellClass}>
                   <span className={textClass}>{date.getDate()}</span>
                   {subText && <span className={subTextClass}>{subText}</span>}
                 </button>
@@ -487,36 +536,131 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent('תור לציפורניים אצל Lihi Nails 💅')}&dates=${formatForGcal(d)}/${formatForGcal(endD)}&details=${encodeURIComponent('זמן הפינוק שלך הגיע!')}`;
   };
 
+  // תצוגת מסך התחברות (ללקוחות חדשים / לא מחוברים)
+  if (screen === 'login') {
+    return (
+      <div className="flex flex-col h-full bg-transparent pb-10 fade-in">
+        <div className="bg-gradient-to-r from-pink-600 to-pink-500 text-white p-8 rounded-b-[40px] shadow-lg relative overflow-hidden text-center flex flex-col items-center">
+          <div className="absolute top-[-50px] right-[-50px] w-32 h-32 bg-pink-400 rounded-full opacity-50 blur-2xl"></div>
+          <img src={logoUrl} onError={(e) => { e.target.onerror = null; e.target.src = '/LOGO.jpeg'; }} alt="Lihi Nails" className="w-28 h-28 rounded-full border-4 border-white/40 shadow-xl mb-4 object-cover bg-white relative z-10" />
+          <h2 className="text-2xl font-bold mb-2 relative z-10">ברוכה הבאה לליהיא ניילס! 💅</h2>
+          <p className="text-pink-50 text-sm font-medium relative z-10">האזור האישי שלך לניהול וקביעת תורים.</p>
+        </div>
+
+        <div className="px-6 mt-8 flex-1">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+            <h3 className="font-bold text-gray-800 mb-6 text-center text-lg">לכניסה, אנא הזיני פרטים:</h3>
+            <form onSubmit={handleLoginSubmit} className="space-y-4 text-right">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">מספר טלפון <span className="text-red-500">*</span></label>
+                <input type="tel" required value={loginPhone} onChange={e => setLoginPhone(e.target.value)} className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-right focus:ring-2 focus:ring-pink-400 outline-none" placeholder="05X-XXXXXXX" dir="ltr" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">איך קוראים לך? (לא חובה)</label>
+                <input type="text" value={loginName} onChange={e => setLoginName(e.target.value)} className="w-full p-4 bg-gray-50 border border-gray-200 rounded-2xl text-right focus:ring-2 focus:ring-pink-400 outline-none" placeholder="שם מלא" dir="rtl" />
+              </div>
+              <button type="submit" className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg mt-2 shadow-lg hover:bg-pink-700 transition-colors">התחברי לאזור האישי ✨</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // תצוגת אזור אישי (Dashboard)
+  if (screen === 'dashboard') {
+    return (
+      <div className="flex flex-col h-full bg-gray-50 pb-10 fade-in">
+        <div className="bg-gradient-to-r from-pink-600 to-pink-500 text-white p-6 rounded-b-[40px] shadow-lg relative overflow-hidden flex justify-between items-start">
+          <div className="absolute top-[-50px] right-[-50px] w-32 h-32 bg-pink-400 rounded-full opacity-50 blur-2xl"></div>
+          <div className="relative z-10">
+            <h2 className="text-2xl font-bold mb-1">היי {loginName || 'מהממת'}! 👋</h2>
+            <p className="text-pink-50 text-sm">האזור האישי שלך ב-Lihi Nails</p>
+          </div>
+          <button onClick={handleLogout} className="relative z-10 bg-white/20 hover:bg-white/30 p-2 rounded-full transition-colors" title="התנתק"><LogOut size={18} /></button>
+        </div>
+
+        <div className="px-5 mt-6 flex-1">
+          <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-pink-500" size={20} /> התורים הקרובים שלך:</h3>
+          
+          {myAppointments.length === 0 ? (
+            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 text-center mb-6">
+              <div className="w-16 h-16 bg-pink-50 text-pink-300 rounded-full flex items-center justify-center mx-auto mb-4"><CalendarX size={32}/></div>
+              <h3 className="text-gray-800 font-bold mb-1">אין לך תורים קרובים</h3>
+              <p className="text-gray-500 text-sm">זה הזמן לקבוע תור חדש ולהתפנק! 💅</p>
+            </div>
+          ) : (
+            <div className="space-y-4 mb-6">
+              {myAppointments.map(appt => (
+                <div key={appt.id} className="bg-white p-5 rounded-3xl shadow-sm border border-pink-100 relative overflow-hidden">
+                  <div className="absolute right-0 top-0 bottom-0 w-2 bg-pink-500"></div>
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <div className="text-2xl font-black text-gray-800">{appt.date.split('-').reverse().join('/')}</div>
+                      <div className="text-pink-600 font-bold flex items-center gap-1"><Clock size={14}/> בשעה {appt.time}</div>
+                    </div>
+                  </div>
+                  <div className="text-sm font-medium text-gray-600 bg-gray-50 p-3 rounded-xl mb-4">
+                    <strong>טיפולים:</strong> {appt.services?.map(s => s.label.split('-')[0].trim()).join(', ')}
+                    {appt.extras && appt.extras.length > 0 && <span> | <strong>תוספות:</strong> {appt.extras.map(e => e.label.split('-')[0].trim()).join(', ')}</span>}
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => startReschedule(appt)} className="flex-1 bg-blue-50 text-blue-600 py-3 rounded-xl font-bold text-sm hover:bg-blue-100 transition-colors flex items-center justify-center gap-1"><CalendarClock size={16}/> שינוי מועד</button>
+                    <button onClick={() => confirmCancel(appt)} className="flex-1 bg-red-50 text-red-600 py-3 rounded-xl font-bold text-sm hover:bg-red-100 transition-colors flex items-center justify-center gap-1"><X size={16}/> ביטול תור</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={startNewBooking} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg flex justify-center items-center gap-2 shadow-lg hover:bg-gray-800 transition-colors mt-2">
+            <PlusCircle size={20} /> קביעת תור חדש
+          </button>
+        </div>
+
+        {/* מודאל אישור ביטול (פופ-אפ) */}
+        {cancelPrompt && (
+          <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 fade-in">
+            <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl text-center">
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${cancelPrompt.isLateCancel ? 'bg-red-100 text-red-500' : 'bg-orange-100 text-orange-500'}`}>
+                <AlertCircle size={32}/>
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 mb-2">ביטול תור</h3>
+              {cancelPrompt.isLateCancel ? (
+                <p className="text-sm text-gray-600 mb-6 bg-red-50 p-3 rounded-xl border border-red-100">
+                  <strong className="text-red-700 block mb-1">שימי לב! ⚠️</strong>
+                  התור שלך מתקיים בעוד פחות מ-24 שעות. לפי המדיניות, ביטול כעת כרוך בתשלום דמי ביטול. האם את בטוחה?
+                </p>
+              ) : (
+                <p className="text-sm text-gray-600 mb-6">האם את בטוחה שברצונך לבטל את התור ל-{cancelPrompt.appt.date.split('-').reverse().join('/')} בשעה {cancelPrompt.appt.time}?</p>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => setCancelPrompt(null)} className="flex-1 py-3 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200">לא, התחרטתי</button>
+                <button onClick={executeCancel} className="flex-1 py-3 rounded-xl font-bold text-white bg-red-500 hover:bg-red-600 shadow-md">כן, בטלי תור</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // תצוגת קביעת תור (או דחיית תור)
   return (
     <div className="flex flex-col h-full bg-transparent pb-10">
       {step === 1 && (
         <div className="bg-gradient-to-r from-pink-600 to-pink-500 text-white p-6 pb-8 rounded-b-[40px] shadow-lg relative overflow-hidden border-b-[3px] border-pink-300">
           <div className="absolute top-[-50px] right-[-50px] w-32 h-32 bg-pink-400 rounded-full opacity-50 blur-2xl"></div>
-          <div className="absolute bottom-[-30px] left-[-20px] w-24 h-24 bg-pink-400 rounded-full opacity-50 blur-xl"></div>
+          <button onClick={() => setScreen('dashboard')} className="absolute top-4 left-4 p-2 bg-white/20 rounded-full hover:bg-white/30 z-20"><ArrowRight size={20}/></button>
           <div className="relative z-10 text-center flex flex-col items-center">
-            <img src={logoUrl} onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; }} alt="Lihi Nails" className="w-28 h-28 rounded-full border-4 border-white/40 shadow-xl mb-4 object-cover bg-white" />
-            <h2 className="text-2xl font-bold mb-2 drop-shadow-md">ליהיא ניילס - מומחית ללק ג'ל 👑💅</h2>
-            <p className="text-pink-50 text-sm leading-relaxed max-w-[280px] mx-auto font-medium text-center">שנים של ניסיון בתחום, הקפדה על הפרטים הקטנים ביותר ומאות לקוחות שכבר התמכרו. בואי להתפנק! 💖✨</p>
+            <img src={logoUrl} onError={(e) => { e.target.onerror = null; e.target.src = DEFAULT_LOGO_URL; }} alt="Lihi Nails" className="w-24 h-24 rounded-full border-4 border-white/40 shadow-xl mb-4 object-cover bg-white" />
+            <h2 className="text-xl font-bold mb-1 drop-shadow-md">קביעת תור חדש 💅</h2>
           </div>
         </div>
       )}
 
       {step === 1 && (
         <div className="px-5 mt-6 fade-in h-full flex flex-col">
-          {/* מציג את התור הקרוב מהזיכרון של הטלפון */}
-          {upcomingAppt && (
-            <div className="bg-white p-4 rounded-2xl shadow-sm border-2 border-pink-400 mb-6 relative overflow-hidden animate-slide-up">
-              <div className="absolute left-0 top-0 bottom-0 w-2 bg-pink-500"></div>
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-pink-700 font-black text-sm mb-1">היי {upcomingAppt.name}, התור הבא שלך:</h3>
-                  <div className="text-gray-800 font-bold text-lg">{upcomingAppt.date.split('-').reverse().join('/')} בשעה {upcomingAppt.time}</div>
-                </div>
-                <button onClick={() => { localStorage.removeItem('lihi_upcoming_appt'); setUpcomingAppt(null); }} className="text-gray-400 hover:text-gray-600 p-1"><X size={16}/></button>
-              </div>
-            </div>
-          )}
-
           <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Heart className="text-pink-500" size={20} /> איזה טיפולים תרצי היום?</h3>
           <div className="space-y-3 flex-1">
             {services.map(service => {
@@ -557,18 +701,19 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
               <button onClick={() => setStep(2)} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold text-lg flex justify-center items-center gap-2 shadow-lg hover:bg-gray-800 transition-colors">המשך לבחירת תאריך <ArrowRight size={20} /></button>
             </div>
           )}
-          <div className="mt-8 mb-6 p-4 bg-rose-50 border border-rose-200 rounded-2xl text-center shadow-sm">
-            <p className="text-xs text-rose-800 font-medium leading-relaxed">
-              <strong>שימי לב:</strong> במידה ויש צורך לבטל או לשנות תור, יש לעשות זאת לפחות 24 שעות מראש. <br/>
-              ביטול בפחות מ-24 שעות יחויב בדמי ביטול בסך 50% מעלות הטיפול. הזמן שלי יקר. 💖
-            </p>
-          </div>
         </div>
       )}
 
       {step === 2 && (
         <div className="px-5 mt-6 fade-in">
-          <button onClick={() => setStep(1)} className="text-gray-500 mb-4 flex items-center gap-1 hover:text-pink-600 transition-colors w-fit"><ArrowRight size={16} /> חזרה לטיפולים</button>
+          {rescheduleAppt ? (
+            <div className="mb-4">
+               <button onClick={() => setScreen('dashboard')} className="text-gray-500 flex items-center gap-1 hover:text-pink-600 transition-colors w-fit mb-2"><ArrowRight size={16} /> ביטול חזרה לאזור האישי</button>
+               <div className="bg-blue-50 text-blue-800 p-3 rounded-xl text-sm font-bold border border-blue-200">🔄 שינוי מועד לתור מיום {rescheduleAppt.date.split('-').reverse().join('/')}</div>
+            </div>
+          ) : (
+            <button onClick={() => setStep(1)} className="text-gray-500 mb-4 flex items-center gap-1 hover:text-pink-600 transition-colors w-fit"><ArrowRight size={16} /> חזרה לטיפולים</button>
+          )}
           
           <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><Calendar className="text-pink-500" size={20} /> מתי נוח לך?</h3>
           {renderCalendar()}
@@ -596,7 +741,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
         <div className="p-6 fade-in h-full flex flex-col">
           <button onClick={() => setStep(2)} className="text-gray-500 mb-6 flex items-center gap-1 hover:text-pink-600 transition-colors w-fit"><ArrowRight size={16} /> חזרה ליומן</button>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">עוד צעד אחד קטן...</h2>
-          <p className="text-gray-500 mb-6 text-sm">התור שלך שמור ל-{selectedDate.split('-').reverse().join('/')} בשעה {selectedTime}. רק נשאר למלא פרטים:</p>
+          <p className="text-gray-500 mb-6 text-sm">התור ישמר ל-{selectedDate.split('-').reverse().join('/')} בשעה {selectedTime}. אישור סופי:</p>
           
           <div className="bg-pink-50 p-3 rounded-xl mb-6 text-sm text-pink-800 font-medium border border-pink-200">
             <div><strong>טיפולים:</strong> {selectedServices.map(s => s.label.split('-')[0].trim()).join(', ')}</div>
@@ -616,7 +761,9 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
               <label className="block text-sm font-bold text-gray-700 mb-2">הערות (לא חובה)</label>
               <textarea value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} className="w-full p-4 bg-white/90 border border-gray-200 rounded-2xl resize-none h-24 focus:ring-2 focus:ring-pink-400 outline-none transition-all" placeholder="נשברה ציפורן? בקשה מיוחדת?" dir="rtl" />
             </div>
-            <button type="submit" className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg mt-4 shadow-lg hover:bg-pink-700 transition-colors">אשרי את התור! ✨</button>
+            <button type="submit" className="w-full bg-pink-600 text-white py-4 rounded-2xl font-bold text-lg mt-4 shadow-lg hover:bg-pink-700 transition-colors">
+              {rescheduleAppt ? 'עדכני את התור! ✨' : 'אשרי את התור! ✨'}
+            </button>
           </form>
         </div>
       )}
@@ -625,7 +772,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
         <div className="p-6 h-full flex flex-col items-center justify-center text-center fade-in bg-white/90">
           <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6 text-green-500 shadow-inner"><CheckCircle size={50} /></div>
           <h2 className="text-3xl font-black text-gray-800 mb-2">איזה כיף! 🥳</h2>
-          <p className="text-xl text-pink-600 font-bold mb-4">התור שלך נקבע בהצלחה 💅✨</p>
+          <p className="text-xl text-pink-600 font-bold mb-4">{rescheduleAppt ? 'התור שלך עודכן בהצלחה' : 'התור שלך נקבע בהצלחה'} 💅✨</p>
           
           <div className="bg-rose-50/90 rounded-2xl p-6 w-full mb-8 border border-rose-100 relative overflow-hidden shadow-sm">
              <div className="absolute -right-4 -top-4 text-pink-200 opacity-40"><Heart size={80} fill="currentColor" /></div>
@@ -640,7 +787,7 @@ function CustomerView({ schedule, blockedDates, blockedTimeSlots, services, extr
           <div className="w-full space-y-3 mb-6 mt-4">
             <a href={generateGoogleCalendarLink()} target="_blank" rel="noopener noreferrer" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3 shadow-lg hover:bg-blue-700 transition-colors"><CalendarPlus size={24} /> הוספה ל-Google Calendar</a>
           </div>
-          <button onClick={() => { setStep(1); setSelectedServices([]); setSelectedExtras([]); setSelectedDate(''); setSelectedTime(''); setFormData({ name: '', phone: '', notes: '' }); window.location.reload(); }} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-gray-800 transition-colors">סיום וחזרה לראשי</button>
+          <button onClick={() => { setScreen('dashboard'); }} className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-gray-800 transition-colors">סיום וחזרה לאזור האישי</button>
         </div>
       )}
     </div>
@@ -1003,6 +1150,14 @@ function AdminMenuManager({ services, extras, onUpdateSetting }) {
   const [newService, setNewService] = useState({ label: '', price: '', hours: 1 });
   const [newExtra, setNewExtra] = useState({ label: '', price: '' });
 
+  // -- סטייטים לעריכת טיפולים ותוספות --
+  const [editingServiceId, setEditingServiceId] = useState(null);
+  const [editServiceData, setEditServiceData] = useState({ name: '', price: '', hours: 1 });
+  
+  const [editingExtraId, setEditingExtraId] = useState(null);
+  const [editExtraData, setEditExtraData] = useState({ name: '', price: '' });
+
+  // -- פונקציות הוספה --
   const handleAddService = () => {
     if (!newService.label || !newService.price) return;
     const s = { 
@@ -1013,12 +1168,6 @@ function AdminMenuManager({ services, extras, onUpdateSetting }) {
     };
     onUpdateSetting('services', [...(services || []), s]);
     setNewService({ label: '', price: '', hours: 1 });
-  };
-
-  const handleDeleteService = (id) => {
-    if(window.confirm('למחוק טיפול זה?')) {
-      onUpdateSetting('services', (services || []).filter(s => s.id !== id));
-    }
   };
 
   const handleAddExtra = () => {
@@ -1032,30 +1181,144 @@ function AdminMenuManager({ services, extras, onUpdateSetting }) {
     setNewExtra({ label: '', price: '' });
   };
 
+  // -- פונקציות מחיקה --
+  const handleDeleteService = (id) => {
+    if(window.confirm('למחוק טיפול זה?')) {
+      onUpdateSetting('services', (services || []).filter(s => s.id !== id));
+    }
+  };
+
   const handleDeleteExtra = (id) => {
     if(window.confirm('למחוק תוספת זו?')) {
       onUpdateSetting('extras', (extras || []).filter(e => e.id !== id));
     }
   };
 
+  // -- פונקציות עריכה (טיפולים) --
+  const startEditingService = (s) => {
+    setEditingServiceId(s.id);
+    setEditServiceData({
+      name: s.label.split('-')[0].trim(),
+      price: s.price,
+      hours: s.hours || 1
+    });
+  };
+
+  const saveEditedService = () => {
+    if (!editServiceData.name || !editServiceData.price) return;
+    const updatedServices = (services || []).map(s => {
+      if (s.id === editingServiceId) {
+        return {
+          ...s,
+          label: `${editServiceData.name} - ${editServiceData.price} ₪`,
+          price: Number(editServiceData.price),
+          hours: Number(editServiceData.hours)
+        };
+      }
+      return s;
+    });
+    onUpdateSetting('services', updatedServices);
+    setEditingServiceId(null);
+  };
+
+  // -- פונקציות עריכה (תוספות) --
+  const startEditingExtra = (e) => {
+    setEditingExtraId(e.id);
+    setEditExtraData({
+      name: e.label.split('-')[0].trim(),
+      price: e.price
+    });
+  };
+
+  const saveEditedExtra = () => {
+    if (!editExtraData.name || !editExtraData.price) return;
+    const updatedExtras = (extras || []).map(e => {
+      if (e.id === editingExtraId) {
+        return {
+          ...e,
+          label: `${editExtraData.name} - ${editExtraData.price} ₪`,
+          price: Number(editExtraData.price)
+        };
+      }
+      return e;
+    });
+    onUpdateSetting('extras', updatedExtras);
+    setEditingExtraId(null);
+  };
+
+  // -- פונקציות שינוי סדר (למעלה / למטה) --
+  const moveService = (index, direction) => {
+    const newServices = [...(services || [])];
+    if (direction === 'up' && index > 0) {
+      [newServices[index - 1], newServices[index]] = [newServices[index], newServices[index - 1]];
+    } else if (direction === 'down' && index < newServices.length - 1) {
+      [newServices[index + 1], newServices[index]] = [newServices[index], newServices[index + 1]];
+    } else {
+      return;
+    }
+    onUpdateSetting('services', newServices);
+  };
+
+  const moveExtra = (index, direction) => {
+    const newExtras = [...(extras || [])];
+    if (direction === 'up' && index > 0) {
+      [newExtras[index - 1], newExtras[index]] = [newExtras[index], newExtras[index - 1]];
+    } else if (direction === 'down' && index < newExtras.length - 1) {
+      [newExtras[index + 1], newExtras[index]] = [newExtras[index], newExtras[index + 1]];
+    } else {
+      return;
+    }
+    onUpdateSetting('extras', newExtras);
+  };
+
   return (
-    <div className="pb-10">
+    <div className="pb-10 fade-in">
+      {/* ניהול טיפולים מרכזיים */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Star className="text-pink-500" size={18}/> ניהול טיפולים</h3>
         
         <div className="space-y-2 mb-4">
-          {(services || []).map(s => (
-            <div key={s.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
-              <div>
-                <div className="font-bold text-sm">{s.label.split('-')[0].trim()}</div>
-                <div className="text-xs text-gray-500">₪{s.price} | {s.hours} שעות</div>
-              </div>
-              <button onClick={() => handleDeleteService(s.id)} className="text-red-400 hover:text-red-600 p-2"><Trash2 size={16}/></button>
+          {(services || []).map((s, index) => (
+            <div key={s.id} className="flex flex-col p-3 bg-gray-50 rounded-xl border border-gray-100">
+              {editingServiceId === s.id ? (
+                <div className="flex flex-col gap-2 w-full animate-fade-in mt-1 mb-1">
+                  <input type="text" value={editServiceData.name} onChange={e => setEditServiceData({...editServiceData, name: e.target.value})} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-pink-400 outline-none" placeholder="שם הטיפול" />
+                  <div className="flex gap-2">
+                    <input type="number" value={editServiceData.price} onChange={e => setEditServiceData({...editServiceData, price: e.target.value})} className="flex-1 p-2 border rounded-lg text-sm focus:ring-2 focus:ring-pink-400 outline-none" placeholder="מחיר (₪)" />
+                    <select value={editServiceData.hours} onChange={e => setEditServiceData({...editServiceData, hours: e.target.value})} className="flex-1 p-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-pink-400 outline-none">
+                      <option value={1}>שעה 1</option>
+                      <option value={2}>2 שעות</option>
+                      <option value={3}>3 שעות</option>
+                    </select>
+                  </div>
+                  <div className="flex gap-2 justify-end mt-2">
+                    <button onClick={() => setEditingServiceId(null)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl text-xs font-bold hover:bg-gray-300">ביטול</button>
+                    <button onClick={saveEditedService} className="px-4 py-2 bg-green-500 text-white rounded-xl text-xs font-bold hover:bg-green-600 flex items-center gap-1"><Check size={14}/> שמור שינויים</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center w-full">
+                  <div className="flex items-center gap-3">
+                    <div className="flex flex-col items-center justify-center bg-white border border-gray-200 rounded-lg p-0.5 shadow-sm">
+                      <button onClick={() => moveService(index, 'up')} disabled={index === 0} className={`p-0.5 ${index === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-100 rounded text-gray-700'}`}><ChevronUp size={16}/></button>
+                      <button onClick={() => moveService(index, 'down')} disabled={index === (services || []).length - 1} className={`p-0.5 ${index === (services || []).length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-100 rounded text-gray-700'}`}><ChevronDown size={16}/></button>
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-gray-800">{s.label.split('-')[0].trim()}</div>
+                      <div className="text-xs text-pink-600 font-medium mt-0.5">₪{s.price} | {s.hours} שעות</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={() => startEditingService(s)} className="text-blue-500 hover:bg-blue-50 p-2 rounded-lg transition-colors"><Edit2 size={16}/></button>
+                    <button onClick={() => handleDeleteService(s.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
 
-        <div className="bg-pink-50 p-4 rounded-xl border border-pink-100 space-y-3">
+        <div className="bg-pink-50 p-4 rounded-xl border border-pink-100 space-y-3 mt-6">
           <h4 className="text-xs font-bold text-pink-800">הוספת טיפול חדש</h4>
           <input type="text" placeholder="שם הטיפול (למשל: בנייה בג'ל)" value={newService.label} onChange={e => setNewService({...newService, label: e.target.value})} className="w-full p-2 rounded-lg text-sm border-gray-200 outline-none focus:ring-1 focus:ring-pink-400" />
           <div className="flex gap-2">
@@ -1066,30 +1329,53 @@ function AdminMenuManager({ services, extras, onUpdateSetting }) {
               <option value={3}>זמן: 3 שעות</option>
             </select>
           </div>
-          <button onClick={handleAddService} className="w-full bg-pink-600 text-white py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1 hover:bg-pink-700"><Plus size={16}/> הוסף לתפריט</button>
+          <button onClick={handleAddService} className="w-full bg-pink-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-pink-700 transition-colors shadow-sm"><Plus size={16}/> הוסף לתפריט</button>
         </div>
       </div>
 
+      {/* ניהול תוספות */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
         <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><PlusCircle className="text-blue-500" size={18}/> ניהול תוספות</h3>
         
         <div className="space-y-2 mb-4">
-          {(extras || []).map(e => (
-            <div key={e.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
-              <div>
-                <div className="font-bold text-sm">{e.label.split('-')[0].trim()}</div>
-                <div className="text-xs text-gray-500">₪{e.price}</div>
-              </div>
-              <button onClick={() => handleDeleteExtra(e.id)} className="text-red-400 hover:text-red-600 p-2"><Trash2 size={16}/></button>
+          {(extras || []).map((e, index) => (
+            <div key={e.id} className="flex flex-col p-3 bg-gray-50 rounded-xl border border-gray-100">
+              {editingExtraId === e.id ? (
+                <div className="flex flex-col gap-2 w-full animate-fade-in mt-1 mb-1">
+                  <input type="text" value={editExtraData.name} onChange={evt => setEditExtraData({...editExtraData, name: evt.target.value})} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none" placeholder="שם התוספת" />
+                  <input type="number" value={editExtraData.price} onChange={evt => setEditExtraData({...editExtraData, price: evt.target.value})} className="w-full p-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none" placeholder="מחיר (₪)" />
+                  <div className="flex gap-2 justify-end mt-2">
+                    <button onClick={() => setEditingExtraId(null)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl text-xs font-bold hover:bg-gray-300">ביטול</button>
+                    <button onClick={saveEditedExtra} className="px-4 py-2 bg-green-500 text-white rounded-xl text-xs font-bold hover:bg-green-600 flex items-center gap-1"><Check size={14}/> שמור שינויים</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center w-full">
+                  <div className="flex items-center gap-3">
+                    <div className="flex flex-col items-center justify-center bg-white border border-gray-200 rounded-lg p-0.5 shadow-sm">
+                      <button onClick={() => moveExtra(index, 'up')} disabled={index === 0} className={`p-0.5 ${index === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-100 rounded text-gray-700'}`}><ChevronUp size={16}/></button>
+                      <button onClick={() => moveExtra(index, 'down')} disabled={index === (extras || []).length - 1} className={`p-0.5 ${index === (extras || []).length - 1 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-100 rounded text-gray-700'}`}><ChevronDown size={16}/></button>
+                    </div>
+                    <div>
+                      <div className="font-bold text-sm text-gray-800">{e.label.split('-')[0].trim()}</div>
+                      <div className="text-xs text-blue-600 font-medium mt-0.5">₪{e.price}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button onClick={() => startEditingExtra(e)} className="text-blue-500 hover:bg-blue-50 p-2 rounded-lg transition-colors"><Edit2 size={16}/></button>
+                    <button onClick={() => handleDeleteExtra(e.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
 
-        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-3">
+        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 space-y-3 mt-6">
           <h4 className="text-xs font-bold text-blue-800">הוספת תוספת חדשה</h4>
           <input type="text" placeholder="שם התוספת (למשל: קישוט בודד)" value={newExtra.label} onChange={e => setNewExtra({...newExtra, label: e.target.value})} className="w-full p-2 rounded-lg text-sm border-gray-200 outline-none focus:ring-1 focus:ring-blue-400" />
           <input type="number" placeholder="מחיר (₪)" value={newExtra.price} onChange={e => setNewExtra({...newExtra, price: e.target.value})} className="w-full p-2 rounded-lg text-sm border-gray-200 outline-none focus:ring-1 focus:ring-blue-400" />
-          <button onClick={handleAddExtra} className="w-full bg-blue-600 text-white py-2 rounded-lg font-bold text-sm flex items-center justify-center gap-1 hover:bg-blue-700"><Plus size={16}/> הוסף תוספת</button>
+          <button onClick={handleAddExtra} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors shadow-sm"><Plus size={16}/> הוסף תוספת</button>
         </div>
       </div>
     </div>
